@@ -1,0 +1,43 @@
+{
+  "name": "react-native-vision-ml",
+  "version": "1.0.0",
+  "description": "Native ONNX Runtime inference with YOLO post-processing for React Native",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "author": "Neher Data",
+  "license": "MIT",
+  "keywords": [
+    "react-native",
+    "ios",
+    "onnx",
+    "yolo",
+    "vision",
+    "machine-learning",
+    "nsfw-detection",
+    "object-detection",
+    "coreml"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neherdata/react-native-vision-ml.git"
+  },
+  "homepage": "https://github.com/neherdata/react-native-vision-ml#readme",
+  "bugs": {
+    "url": "https://github.com/neherdata/react-native-vision-ml/issues"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-native": "^0.72.0",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "src/",
+    "ios/",
+    "react-native-vision-ml.podspec",
+    "README.md"
+  ]
+}
