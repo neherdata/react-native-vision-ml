@@ -272,7 +272,8 @@ class VisionMLModule: NSObject {
 
         for (jointName, point) in recognizedPoints {
           if point.confidence > 0.1 {
-            points[jointName.rawValue] = [
+            let keyString = String(describing: jointName.rawValue)
+            points[keyString] = [
               "x": point.location.x,
               "y": point.location.y,
               "confidence": point.confidence
