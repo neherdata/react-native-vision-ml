@@ -41,7 +41,8 @@ class ONNXInference {
 
       // Create session options with CoreML execution provider
       let options = try ORTSessionOptions()
-      try options.appendCoreMLExecutionProvider(with: [:])
+      let coreMLOptions = ORTCoreMLExecutionProviderOptions()
+      try options.appendCoreMLExecutionProvider(with: coreMLOptions)
 
       // Create inference session
       session = try ORTSession(env: environment!, modelPath: modelPath, sessionOptions: options)
@@ -101,7 +102,7 @@ class ONNXInference {
 
     guard let outputs = try? session.run(
       withInputs: [inputName: tensor],
-      outputNames: try session.outputNames(),
+      outputNames: Set(try session.outputNames()),
       runOptions: nil
     ) else {
       throw InferenceError.inferenceFailedNot("Session run failed")
