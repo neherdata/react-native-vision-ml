@@ -89,8 +89,140 @@ export async function dispose(): Promise<{ success: boolean }> {
   return VisionML.dispose();
 }
 
+// MARK: - Vision Framework Types
+
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Label {
+  identifier: string;
+  confidence: number;
+}
+
+export interface AnimalDetection {
+  boundingBox: BoundingBox;
+  confidence: number;
+  labels: Label[];
+}
+
+export interface AnimalAnalysis {
+  animals: AnimalDetection[];
+  count: number;
+}
+
+export interface BodyPoint {
+  x: number;
+  y: number;
+  confidence: number;
+}
+
+export interface HumanPose {
+  points: Record<string, BodyPoint>;
+  pointCount: number;
+}
+
+export interface HumanPoseAnalysis {
+  humans: HumanPose[];
+  humanCount: number;
+}
+
+export interface FaceDetection {
+  boundingBox: BoundingBox;
+  confidence: number;
+}
+
+export interface ComprehensiveAnalysis {
+  // Scene Classification (VNClassifyImageRequest)
+  scenes?: Array<{ identifier: string; confidence: number }>;
+
+  // Face Detection
+  faces?: FaceDetection[];
+  faceCount?: number;
+
+  // Animal Detection (VNRecognizeAnimalsRequest)
+  animals?: AnimalDetection[];
+  animalCount?: number;
+
+  // Human Pose Detection (VNDetectHumanBodyPoseRequest)
+  humanCount?: number;
+  hasHumans?: boolean;
+
+  // Text Detection
+  hasText?: boolean;
+  textRegions?: number;
+
+  // Rectangle Detection (screenshots, documents)
+  rectangles?: number;
+  likelyScreenshot?: boolean;
+}
+
+/**
+ * Detect animals in photos using VNRecognizeAnimalsRequest
+ * Currently supports cats and dogs with bounding boxes
+ *
+ * Use cases:
+ * - Filter pet photos for batch scanning
+ * - Identify photos that are unlikely to be NSFW
+ * - Provide additional metadata for photo organization
+ *
+ * @param assetId - Photo asset identifier from MediaLibrary
+ * @returns Animal detection results with bounding boxes and labels
+ */
+export async function analyzeAnimals(assetId: string): Promise<AnimalAnalysis> {
+  return VisionML.analyzeAnimals(assetId);
+}
+
+/**
+ * Detect human body poses using VNDetectHumanBodyPoseRequest
+ * Returns up to 19 body joint points with confidence scores
+ *
+ * Use cases:
+ * - Detect fitness/exercise photos
+ * - Identify dance or sports photos
+ * - Provide additional context for scene understanding
+ *
+ * Note: Does not work in iOS Simulator, requires physical device
+ *
+ * @param assetId - Photo asset identifier from MediaLibrary
+ * @returns Human pose analysis with joint points
+ */
+export async function analyzeHumanPose(assetId: string): Promise<HumanPoseAnalysis> {
+  return VisionML.analyzeHumanPose(assetId);
+}
+
+/**
+ * Comprehensive Vision framework analysis
+ * Runs all available Vision detectors in parallel:
+ * - VNClassifyImageRequest (scene classification, ~1000 categories)
+ * - VNDetectFaceRectanglesRequest (face detection)
+ * - VNRecognizeAnimalsRequest (cat/dog detection)
+ * - VNDetectHumanBodyPoseRequest (pose estimation)
+ * - VNRecognizeTextRequest (text detection)
+ * - VNDetectRectanglesRequest (screenshot detection)
+ *
+ * Use cases:
+ * - Deep photo analysis for categorization
+ * - Pre-screening before API calls
+ * - Rich metadata extraction for search
+ *
+ * Performance: ~200-400ms on modern devices
+ *
+ * @param assetId - Photo asset identifier from MediaLibrary
+ * @returns Comprehensive analysis results
+ */
+export async function analyzeComprehensive(assetId: string): Promise<ComprehensiveAnalysis> {
+  return VisionML.analyzeComprehensive(assetId);
+}
+
 export default {
   loadModel,
   detect,
-  dispose
+  dispose,
+  analyzeAnimals,
+  analyzeHumanPose,
+  analyzeComprehensive
 };
