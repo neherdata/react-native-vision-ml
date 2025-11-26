@@ -16,10 +16,18 @@ Pod::Spec.new do |s|
   s.source_files = "ios/**/*.{h,m,mm,swift}"
 
   s.dependency "React-Core"
+
+  # Enable modular headers for onnxruntime-objc to fix Swift interop
+  # This allows Swift code to import onnxruntime without requiring global use_modular_headers!
   s.dependency "onnxruntime-objc", "~> 1.19.0"
 
   # Swift support
   s.swift_version = "5.0"
+
+  # Configure pod to use modular headers for proper Swift/ObjC bridging
+  s.pod_target_xcconfig = {
+    'DEFINES_MODULE' => 'YES'
+  }
 
   # Enable CoreML acceleration
   s.frameworks = "CoreML", "Accelerate", "UIKit", "CoreGraphics"
