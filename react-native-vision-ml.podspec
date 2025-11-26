@@ -19,7 +19,7 @@ Pod::Spec.new do |s|
 
   # Enable modular headers for onnxruntime-objc to fix Swift interop
   # This allows Swift code to import onnxruntime without requiring global use_modular_headers!
-  s.dependency "onnxruntime-objc", "~> 1.19.0"
+  s.dependency "onnxruntime-objc", "~> 1.23.0"
 
   # Swift support
   s.swift_version = "5.0"
