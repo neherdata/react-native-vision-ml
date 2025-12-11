@@ -81,6 +81,13 @@ class YOLOParser {
       let x2 = (cx + w / 2) * scaleX
       let y2 = (cy + h / 2) * scaleY
 
+      // DEBUG: Log first few detections to verify confidence is correct
+      if detections.count < 3 {
+        let boxArea = (x2 - x1) * (y2 - y1)
+        NSLog("[YOLOParser] Detection #%d: confidence=%.4f, boxArea=%.2f, box=[%.1f,%.1f,%.1f,%.1f]",
+              detections.count, confidence, boxArea, x1, y1, x2, y2)
+      }
+
       detections.append(NMS.Detection(
         box: [x1, y1, x2, y2],
         score: confidence,
