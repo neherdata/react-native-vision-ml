@@ -76,8 +76,10 @@ class ONNXInference {
     // Step 1: Decode and resize image
     NSLog("[ONNXInference] Step 1: Decoding image...")
     let decoded = try ImageDecoder.decode(imageUri: imageUri, targetSize: inputSize)
-    let originalWidth = decoded.width
-    let originalHeight = decoded.height
+    // Use the ORIGINAL dimensions for coordinate scaling, not the resized dimensions
+    let originalWidth = decoded.originalWidth
+    let originalHeight = decoded.originalHeight
+    NSLog("[ONNXInference] Original dimensions for scaling: %d x %d", originalWidth, originalHeight)
 
     // Step 2: Convert to NCHW format for ONNX
     NSLog("[ONNXInference] Step 2: Converting to NCHW tensor format...")

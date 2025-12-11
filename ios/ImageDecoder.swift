@@ -16,9 +16,11 @@ class ImageDecoder {
   }
 
   struct DecodedImage {
-    let width: Int
-    let height: Int
-    let data: [Float]  // Normalized RGB pixel data (0.0-1.0)
+    let width: Int           // Resized width (or original if no resize)
+    let height: Int          // Resized height (or original if no resize)
+    let originalWidth: Int   // Original image width before any resize
+    let originalHeight: Int  // Original image height before any resize
+    let data: [Float]        // Normalized RGB pixel data (0.0-1.0)
   }
 
   /// Decode and optionally resize image to target size
@@ -136,7 +138,13 @@ class ImageDecoder {
     }
 
     NSLog("[ImageDecoder] ✓ Decode complete")
-    return DecodedImage(width: width, height: height, data: normalizedPixels)
+    return DecodedImage(
+      width: width,
+      height: height,
+      originalWidth: originalWidth,
+      originalHeight: originalHeight,
+      data: normalizedPixels
+    )
   }
 
   /// Hardware-accelerated image resize using CGContext
