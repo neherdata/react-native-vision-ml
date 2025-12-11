@@ -69,7 +69,7 @@ class VisionMLModule: NSObject {
         let detectionsArray = result.detections.map { detection in
           return [
             "box": detection.box,  // [x1, y1, x2, y2] - already scaled to original image
-            "score": detection.score,
+            "score": NSNumber(value: detection.score),  // Explicitly convert to NSNumber for RN bridge
             "classIndex": detection.classIndex,
             "className": detection.className
           ] as [String: Any]
