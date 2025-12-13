@@ -6,10 +6,18 @@ import Photos
 @objc(VisionML)
 class VisionMLModule: NSObject {
 
-  private var inference: ONNXInference?
+  // Map of detector instances by ID
+  private var detectors: [String: ONNXInference] = [:]
+  private let detectorsQueue = DispatchQueue(label: "com.visionml.detectors", attributes: .concurrent)
 
-  @objc(loadModel:classLabels:inputSize:resolve:reject:)
-  func loadModel(
+  // Counter for generating unique detector IDs
+  private var detectorIdCounter = 0
+  private let counterQueue = DispatchQueue(label: "com.visionml.counter")
+
+  /// Create a new detector instance with its own model and configuration
+  /// Returns a unique detector ID for subsequent operations
+  @objc(createDetector:classLabels:inputSize:resolve:reject:)
+  func createDetector(
     _ modelPath: String,
     classLabels: [String],
     inputSize: NSNumber,
@@ -19,40 +27,59 @@ class VisionMLModule: NSObject {
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         // Create inference instance
-        self.inference = ONNXInference(
+        let inference = ONNXInference(
           classLabels: classLabels,
           inputSize: inputSize.intValue
         )
 
         // Load model
-        try self.inference?.loadModel(modelPath: modelPath)
+        try inference.loadModel(modelPath: modelPath)
+
+        // Generate unique ID
+        let detectorId = self.counterQueue.sync {
+          self.detectorIdCounter += 1
+          return "detector_\(self.detectorIdCounter)"
+        }
+
+        // Store detector
+        self.detectorsQueue.async(flags: .barrier) {
+          self.detectors[detectorId] = inference
+        }
 
         DispatchQueue.main.async {
           resolve([
+            "detectorId": detectorId,
             "success": true,
-            "message": "Model loaded successfully"
+            "message": "Detector created successfully"
           ])
         }
       } catch {
         DispatchQueue.main.async {
-          reject("MODEL_LOAD_ERROR", "Failed to load ONNX model: \(error.localizedDescription)", error)
+          reject("DETECTOR_CREATE_ERROR", "Failed to create detector: \(error.localizedDescription)", error)
         }
       }
     }
   }
 
-  @objc(detect:confidenceThreshold:iouThreshold:resolve:reject:)
+  /// Run detection using a specific detector instance
+  @objc(detect:imageUri:confidenceThreshold:iouThreshold:resolve:reject:)
   func detect(
-    _ imageUri: String,
+    _ detectorId: String,
+    imageUri: String,
     confidenceThreshold: NSNumber,
     iouThreshold: NSNumber,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
     DispatchQueue.global(qos: .userInitiated).async {
-      guard let inference = self.inference else {
+      // Get detector instance
+      let detector = self.detectorsQueue.sync {
+        return self.detectors[detectorId]
+      }
+
+      guard let inference = detector else {
         DispatchQueue.main.async {
-          reject("MODEL_NOT_LOADED", "Model not loaded. Call loadModel first.", nil)
+          reject("DETECTOR_NOT_FOUND", "Detector with ID '\(detectorId)' not found. Create a detector first.", nil)
         }
         return
       }
@@ -91,14 +118,42 @@ class VisionMLModule: NSObject {
     }
   }
 
-  @objc(dispose:reject:)
-  func dispose(
+  /// Dispose of a specific detector instance
+  @objc(disposeDetector:resolve:reject:)
+  func disposeDetector(
+    _ detectorId: String,
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
-    inference?.dispose()
-    inference = nil
-    resolve(["success": true])
+    detectorsQueue.async(flags: .barrier) {
+      if let detector = self.detectors.removeValue(forKey: detectorId) {
+        detector.dispose()
+        DispatchQueue.main.async {
+          resolve(["success": true, "message": "Detector disposed"])
+        }
+      } else {
+        DispatchQueue.main.async {
+          reject("DETECTOR_NOT_FOUND", "Detector with ID '\(detectorId)' not found", nil)
+        }
+      }
+    }
+  }
+
+  /// Dispose of all detector instances
+  @objc(disposeAllDetectors:reject:)
+  func disposeAllDetectors(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    detectorsQueue.async(flags: .barrier) {
+      for (_, detector) in self.detectors {
+        detector.dispose()
+      }
+      self.detectors.removeAll()
+      DispatchQueue.main.async {
+        resolve(["success": true, "message": "All detectors disposed"])
+      }
+    }
   }
 
   // MARK: - Vision Framework Methods
