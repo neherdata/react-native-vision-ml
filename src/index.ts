@@ -42,17 +42,30 @@ export interface DetectionOptions {
 }
 
 /**
- * Load ONNX model for inference
+ * Result from createDetector
+ */
+export interface CreateDetectorResult {
+  /** Unique detector instance ID */
+  detectorId: string;
+  /** Success status */
+  success: boolean;
+  /** Status message */
+  message: string;
+}
+
+/**
+ * Create a new ONNX detector instance
  * @param modelPath - Absolute path to .onnx model file
  * @param classLabels - Array of class label strings
  * @param inputSize - Model input size (default: 320)
+ * @returns Detector instance with unique ID
  */
-export async function loadModel(
+export async function createDetector(
   modelPath: string,
   classLabels: string[],
   inputSize: number = 320
-): Promise<{ success: boolean; message: string }> {
-  return VisionML.loadModel(modelPath, classLabels, inputSize);
+): Promise<CreateDetectorResult> {
+  return VisionML.createDetector(modelPath, classLabels, inputSize);
 }
 
 /**
@@ -66,11 +79,13 @@ export async function loadModel(
  * 5. Parse YOLO output (25,200 predictions)
  * 6. Apply Non-Maximum Suppression
  *
+ * @param detectorId - Detector instance ID from createDetector()
  * @param imageUri - file:// URI to image
  * @param options - Detection options (confidence/IoU thresholds)
  * @returns Inference result with detections in original image coordinates
  */
 export async function detect(
+  detectorId: string,
   imageUri: string,
   options: DetectionOptions = {}
 ): Promise<InferenceResult> {
@@ -79,14 +94,22 @@ export async function detect(
     iouThreshold = 0.45
   } = options;
 
-  return VisionML.detect(imageUri, confidenceThreshold, iouThreshold);
+  return VisionML.detect(detectorId, imageUri, confidenceThreshold, iouThreshold);
 }
 
 /**
- * Dispose of ONNX session and free resources
+ * Dispose of a specific detector instance and free resources
+ * @param detectorId - Detector instance ID to dispose
  */
-export async function dispose(): Promise<{ success: boolean }> {
-  return VisionML.dispose();
+export async function disposeDetector(detectorId: string): Promise<{ success: boolean }> {
+  return VisionML.disposeDetector(detectorId);
+}
+
+/**
+ * Dispose of all detector instances and free resources
+ */
+export async function disposeAllDetectors(): Promise<{ success: boolean }> {
+  return VisionML.disposeAllDetectors();
 }
 
 // MARK: - Vision Framework Types
@@ -219,9 +242,10 @@ export async function analyzeComprehensive(assetId: string): Promise<Comprehensi
 }
 
 export default {
-  loadModel,
+  createDetector,
   detect,
-  dispose,
+  disposeDetector,
+  disposeAllDetectors,
   analyzeAnimals,
   analyzeHumanPose,
   analyzeComprehensive
