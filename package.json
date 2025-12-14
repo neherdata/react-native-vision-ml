@@ -39,5 +39,8 @@
     "ios/",
     "react-native-vision-ml.podspec",
     "README.md"
-  ]
+  ],
+  "dependencies": {
+    "react-native-vision-ml": "^0.1.1"
+  }
 }

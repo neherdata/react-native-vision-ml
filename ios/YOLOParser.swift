@@ -16,6 +16,11 @@ class YOLOParser {
     self.numClasses = classLabels.count
   }
 
+  /// Sigmoid activation to normalize scores to 0-1 range
+  private func sigmoid(_ x: Float) -> Float {
+    return 1.0 / (1.0 + exp(-x))
+  }
+
   /// Parse YOLO output tensor to detections
   /// - Parameters:
   ///   - output: ONNX output tensor data as Float32Array
@@ -55,23 +60,28 @@ class YOLOParser {
       let cy = output[offset + 1]
       let w = output[offset + 2]
       let h = output[offset + 3]
-      let objectness = output[offset + 4]
+      let rawObjectness = output[offset + 4]
+
+      // Apply sigmoid to objectness to normalize to 0-1 range
+      let objectness = sigmoid(rawObjectness)
 
       // Skip low objectness predictions early
       if objectness < confidenceThreshold { continue }
 
-      // Find best class
+      // Find best class and apply sigmoid
       var maxClassScore: Float = 0
       var bestClassIdx = 0
 
       for c in 0..<numClasses {
-        let classScore = output[offset + 5 + c]
+        let rawClassScore = output[offset + 5 + c]
+        let classScore = sigmoid(rawClassScore)
         if classScore > maxClassScore {
           maxClassScore = classScore
           bestClassIdx = c
         }
       }
 
+      // Confidence is product of normalized objectness and class score
       let confidence = objectness * maxClassScore
       if confidence < confidenceThreshold { continue }
 
