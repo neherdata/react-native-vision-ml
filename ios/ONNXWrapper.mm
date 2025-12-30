@@ -1,12 +1,13 @@
 #import "ONNXWrapper.h"
-#import <onnxruntime_objc/ort_session.h>
-#import <onnxruntime_objc/ort_env.h>
-#import <onnxruntime_objc/ort_value.h>
-#import <onnxruntime_objc/ort_coreml_execution_provider.h>
+#include <onnxruntime_cxx_api.h>
+#include <coreml_provider_factory.h>
+#include <vector>
 
-@interface ONNXWrapper ()
-@property (nonatomic, strong) ORTEnv *environment;
-@property (nonatomic, strong) ORTSession *session;
+@interface ONNXWrapper () {
+    std::unique_ptr<Ort::Env> _env;
+    std::unique_ptr<Ort::Session> _session;
+    Ort::AllocatorWithDefaultOptions _allocator;
+}
 @property (nonatomic, assign) NSInteger inputWidth;
 @property (nonatomic, assign) NSInteger inputHeight;
 @end
@@ -16,54 +17,56 @@
 - (nullable instancetype)initWithModelPath:(NSString *)modelPath error:(NSError **)error {
     self = [super init];
     if (self) {
-        // Create ONNX Runtime environment
-        NSError *envError = nil;
-        _environment = [[ORTEnv alloc] initWithLoggingLevel:ORTLoggingLevelWarning error:&envError];
-        if (envError) {
-            if (error) *error = envError;
-            return nil;
-        }
+        try {
+            // Create ONNX Runtime environment
+            _env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "VisionML");
 
-        // Create session options with CoreML acceleration
-        NSError *optionsError = nil;
-        ORTSessionOptions *sessionOptions = [[ORTSessionOptions alloc] initWithError:&optionsError];
-        if (optionsError) {
-            if (error) *error = optionsError;
-            return nil;
-        }
+            // Create session options with CoreML acceleration
+            Ort::SessionOptions sessionOptions;
+            sessionOptions.SetIntraOpNumThreads(1);
+            sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 
-        // Try to add CoreML execution provider for GPU acceleration
-        NSError *coremlError = nil;
-        ORTCoreMLExecutionProviderOptions *coremlOptions = [[ORTCoreMLExecutionProviderOptions alloc] init];
-        coremlOptions.enableOnSubgraphs = YES;
-        [sessionOptions appendCoreMLExecutionProviderWithOptions:coremlOptions error:&coremlError];
-        // CoreML provider is optional - continue even if it fails
+            // Try to add CoreML execution provider for GPU acceleration
+            try {
+                uint32_t coreml_flags = 0;
+                coreml_flags |= COREML_FLAG_ENABLE_ON_SUBGRAPH;
+                OrtSessionOptionsAppendExecutionProvider_CoreML(sessionOptions, coreml_flags);
+            } catch (...) {
+                // CoreML provider is optional - continue even if it fails
+                NSLog(@"[ONNXWrapper] CoreML provider not available, using CPU");
+            }
 
-        // Create session
-        NSError *sessionError = nil;
-        _session = [[ORTSession alloc] initWithEnv:_environment
-                                         modelPath:modelPath
-                                    sessionOptions:sessionOptions
-                                             error:&sessionError];
-        if (sessionError) {
-            if (error) *error = sessionError;
-            return nil;
-        }
+            // Create session
+            std::string pathStr = [modelPath UTF8String];
+            _session = std::make_unique<Ort::Session>(*_env, pathStr.c_str(), sessionOptions);
 
-        // Extract input dimensions from model metadata
-        NSError *inputError = nil;
-        NSArray<ORTValue *> *inputNames = [_session inputNamesWithError:&inputError];
-        if (!inputError && inputNames.count > 0) {
             // Default dimensions for YOLO models
             _inputWidth = 320;
             _inputHeight = 320;
+
+            NSLog(@"[ONNXWrapper] Model loaded successfully");
+
+        } catch (const Ort::Exception& e) {
+            if (error) {
+                *error = [NSError errorWithDomain:@"ONNXWrapper"
+                                             code:1
+                                         userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:e.what()]}];
+            }
+            return nil;
+        } catch (const std::exception& e) {
+            if (error) {
+                *error = [NSError errorWithDomain:@"ONNXWrapper"
+                                             code:2
+                                         userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:e.what()]}];
+            }
+            return nil;
         }
     }
     return self;
 }
 
 - (BOOL)isModelLoaded {
-    return _session != nil;
+    return _session != nullptr;
 }
 
 - (nullable NSArray<NSNumber *> *)runInferenceWithInputData:(NSArray<NSNumber *> *)inputData
@@ -78,85 +81,98 @@
         return nil;
     }
 
-    // Convert input shape to int64_t array
-    NSUInteger shapeCount = inputShape.count;
-    int64_t *shape = (int64_t *)malloc(shapeCount * sizeof(int64_t));
-    for (NSUInteger i = 0; i < shapeCount; i++) {
-        shape[i] = inputShape[i].longLongValue;
-    }
+    try {
+        // Convert input shape to int64_t vector
+        std::vector<int64_t> shape;
+        for (NSNumber *dim in inputShape) {
+            shape.push_back([dim longLongValue]);
+        }
 
-    // Calculate total elements
-    int64_t totalElements = 1;
-    for (NSUInteger i = 0; i < shapeCount; i++) {
-        totalElements *= shape[i];
-    }
+        // Calculate total elements
+        size_t totalElements = 1;
+        for (int64_t dim : shape) {
+            totalElements *= dim;
+        }
 
-    // Convert input data to float array
-    float *inputFloats = (float *)malloc(totalElements * sizeof(float));
-    for (NSInteger i = 0; i < totalElements; i++) {
-        inputFloats[i] = inputData[i].floatValue;
-    }
+        // Convert input data to float vector
+        std::vector<float> inputFloats(totalElements);
+        for (size_t i = 0; i < totalElements; i++) {
+            inputFloats[i] = [inputData[i] floatValue];
+        }
 
-    // Create input tensor
-    NSError *tensorError = nil;
-    NSMutableData *inputMutableData = [NSMutableData dataWithBytes:inputFloats length:totalElements * sizeof(float)];
-    ORTValue *inputTensor = [[ORTValue alloc] initWithTensorData:inputMutableData
-                                                     elementType:ORTTensorElementDataTypeFloat
-                                                           shape:inputShape
-                                                           error:&tensorError];
-    free(inputFloats);
-    free(shape);
+        // Create memory info
+        Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
-    if (tensorError) {
-        if (error) *error = tensorError;
-        return nil;
-    }
+        // Create input tensor
+        Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
+            memoryInfo,
+            inputFloats.data(),
+            totalElements,
+            shape.data(),
+            shape.size()
+        );
 
-    // Get input name
-    NSError *nameError = nil;
-    NSArray<NSString *> *inputNames = [_session inputNamesWithError:&nameError];
-    if (nameError || inputNames.count == 0) {
-        if (error) *error = nameError ?: [NSError errorWithDomain:@"ONNXWrapper" code:2 userInfo:@{NSLocalizedDescriptionKey: @"No input names"}];
-        return nil;
-    }
+        // Get input/output names
+        Ort::AllocatedStringPtr inputNamePtr = _session->GetInputNameAllocated(0, _allocator);
+        Ort::AllocatedStringPtr outputNamePtr = _session->GetOutputNameAllocated(0, _allocator);
 
-    // Run inference
-    NSError *runError = nil;
-    NSDictionary<NSString *, ORTValue *> *inputs = @{inputNames[0]: inputTensor};
-    NSArray<ORTValue *> *outputs = [_session runWithInputs:inputs
-                                               outputNames:nil
-                                             runOptions:nil
-                                                  error:&runError];
-    if (runError) {
-        if (error) *error = runError;
-        return nil;
-    }
+        const char* inputNames[] = {inputNamePtr.get()};
+        const char* outputNames[] = {outputNamePtr.get()};
 
-    if (outputs.count == 0) {
+        // Run inference
+        std::vector<Ort::Value> outputs = _session->Run(
+            Ort::RunOptions{nullptr},
+            inputNames,
+            &inputTensor,
+            1,
+            outputNames,
+            1
+        );
+
+        if (outputs.empty()) {
+            if (error) {
+                *error = [NSError errorWithDomain:@"ONNXWrapper"
+                                             code:3
+                                         userInfo:@{NSLocalizedDescriptionKey: @"No outputs from inference"}];
+            }
+            return nil;
+        }
+
+        // Extract output data
+        Ort::Value& outputTensor = outputs[0];
+        auto typeInfo = outputTensor.GetTensorTypeAndShapeInfo();
+        size_t outputCount = typeInfo.GetElementCount();
+
+        float* outputData = outputTensor.GetTensorMutableData<float>();
+
+        // Convert to NSArray<NSNumber *>
+        NSMutableArray<NSNumber *> *result = [NSMutableArray arrayWithCapacity:outputCount];
+        for (size_t i = 0; i < outputCount; i++) {
+            [result addObject:@(outputData[i])];
+        }
+
+        return result;
+
+    } catch (const Ort::Exception& e) {
         if (error) {
-            *error = [NSError errorWithDomain:@"ONNXWrapper" code:3 userInfo:@{NSLocalizedDescriptionKey: @"No outputs"}];
+            *error = [NSError errorWithDomain:@"ONNXWrapper"
+                                         code:4
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:e.what()]}];
+        }
+        return nil;
+    } catch (const std::exception& e) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"ONNXWrapper"
+                                         code:5
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:e.what()]}];
         }
         return nil;
     }
+}
 
-    // Extract output tensor data
-    NSError *outputError = nil;
-    ORTValue *outputTensor = outputs[0];
-    NSData *outputData = [outputTensor tensorDataWithError:&outputError];
-    if (outputError) {
-        if (error) *error = outputError;
-        return nil;
-    }
-
-    // Convert to NSArray<NSNumber *>
-    const float *outputFloats = (const float *)outputData.bytes;
-    NSUInteger outputCount = outputData.length / sizeof(float);
-    NSMutableArray<NSNumber *> *result = [NSMutableArray arrayWithCapacity:outputCount];
-    for (NSUInteger i = 0; i < outputCount; i++) {
-        [result addObject:@(outputFloats[i])];
-    }
-
-    return result;
+- (void)dealloc {
+    _session.reset();
+    _env.reset();
 }
 
 @end

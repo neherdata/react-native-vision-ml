@@ -13,22 +13,21 @@ Pod::Spec.new do |s|
   s.platforms    = { :ios => "13.0" }
   s.source       = { :git => "https://github.com/neherdata/react-native-vision-ml.git", :tag => "#{s.version}" }
 
-  # Build as static framework for better compatibility
-  s.static_framework = true
-
+  # All source files including Swift and ObjC
   s.source_files = "ios/**/*.{h,m,mm,swift}"
 
   s.dependency "React-Core"
-  s.dependency "onnxruntime-objc", "~> 1.23.0"
+  # Use onnxruntime-c (C/C++ API) to avoid Swift modular headers issue
+  s.dependency "onnxruntime-c", "~> 1.23.0"
 
   # Swift support
   s.swift_version = "5.0"
 
-  # Build settings
+  # Build settings for C++ interop
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    # Include onnxruntime-objc headers for ObjC++ wrapper
-    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_ROOT)/onnxruntime-objc/objectivec/include'
+    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++17',
+    'GCC_ENABLE_CPP_EXCEPTIONS' => 'YES'
   }
 
   # Enable CoreML acceleration
