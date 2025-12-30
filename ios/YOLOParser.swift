@@ -184,6 +184,7 @@ class YOLOParser {
     let nsfwClassNames = ["BUTTOCKS_EXPOSED", "FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_EXPOSED",
                           "ANUS_EXPOSED", "MALE_GENITALIA_EXPOSED"]
 
+    var nsfwFoundCount = 0
     for i in 0..<numPredictions {
       let cx = output[0 * numPredictions + i]
       let cy = output[1 * numPredictions + i]
@@ -193,15 +194,25 @@ class YOLOParser {
       for (idx, nsfwIdx) in nsfwClassIndicesForSecondPass.enumerated() {
         let nsfwScore = output[(4 + nsfwIdx) * numPredictions + i]
         if nsfwScore >= confidenceThreshold {
+          nsfwFoundCount += 1
+
           var nx1 = cx - w / 2
           var ny1 = cy - h / 2
           var nx2 = cx + w / 2
           var ny2 = cy + h / 2
 
+          // Log raw coords before scaling
+          if nsfwFoundCount <= 5 {
+            NSLog("[YOLOParser] NSFW raw: %@ score=%.3f pred=%d cx=%.1f cy=%.1f w=%.1f h=%.1f",
+                  nsfwClassNames[idx], nsfwScore, i, cx, cy, w, h)
+          }
+
           nx1 = nx1 * scaleX
           ny1 = ny1 * scaleY
           nx2 = nx2 * scaleX
           ny2 = ny2 * scaleY
+
+          let beforeClipX1 = nx1, beforeClipY1 = ny1, beforeClipX2 = nx2, beforeClipY2 = ny2
 
           nx1 = max(0, min(nx1, Float(originalWidth)))
           ny1 = max(0, min(ny1, Float(originalHeight)))
@@ -209,17 +220,22 @@ class YOLOParser {
           ny2 = max(0, min(ny2, Float(originalHeight)))
 
           if nx2 > nx1 && ny2 > ny1 {
-            NSLog("[YOLOParser] NSFW Second Pass: %@ score=%.3f at pred %d", nsfwClassNames[idx], nsfwScore, i)
+            NSLog("[YOLOParser] NSFW Second Pass: %@ score=%.3f at pred %d box=[%.0f,%.0f,%.0f,%.0f]",
+                  nsfwClassNames[idx], nsfwScore, i, nx1, ny1, nx2, ny2)
             detections.append(NMS.Detection(
               box: [nx1, ny1, nx2, ny2],
               score: nsfwScore,
               classIndex: nsfwIdx,
               className: classLabels[nsfwIdx]
             ))
+          } else if nsfwFoundCount <= 5 {
+            NSLog("[YOLOParser] NSFW REJECTED (bad box): %@ score=%.3f before=[%.0f,%.0f,%.0f,%.0f] after=[%.0f,%.0f,%.0f,%.0f]",
+                  nsfwClassNames[idx], nsfwScore, beforeClipX1, beforeClipY1, beforeClipX2, beforeClipY2, nx1, ny1, nx2, ny2)
           }
         }
       }
     }
+    NSLog("[YOLOParser] Second pass found %d NSFW scores >= threshold", nsfwFoundCount)
 
     NSLog("[YOLOParser] Parsed %d detections before NMS (threshold: %.2f)", detections.count, confidenceThreshold)
 
