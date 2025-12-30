@@ -107,7 +107,8 @@ class VisionMLModule: NSObject {
             "detections": detectionsArray,
             "inferenceTime": result.inferenceTime,
             "postProcessTime": result.postProcessTime,
-            "totalTime": result.totalTime
+            "totalTime": result.totalTime,
+            "debugInfo": result.debugInfo
           ])
         }
       } catch {

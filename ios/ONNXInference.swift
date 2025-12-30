@@ -17,6 +17,7 @@ class ONNXInference {
     let inferenceTime: Int  // milliseconds
     let postProcessTime: Int  // milliseconds
     let totalTime: Int  // milliseconds
+    let debugInfo: [String: Any]  // Debug info from parser
   }
 
   private var wrapper: ONNXWrapper?
@@ -128,7 +129,8 @@ class ONNXInference {
       detections: finalDetections,
       inferenceTime: inferenceTime,
       postProcessTime: postProcessTime,
-      totalTime: totalTime
+      totalTime: totalTime,
+      debugInfo: parser.lastDebugInfo
     )
   }
 

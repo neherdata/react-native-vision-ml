@@ -25,6 +25,9 @@ class YOLOParser {
   ///   - originalWidth: Original image width for coordinate scaling
   ///   - originalHeight: Original image height for coordinate scaling
   /// - Returns: Array of parsed detections
+  // Store debug info for last parse call
+  var lastDebugInfo: [String: Any] = [:]
+
   func parse(
     output: [Float],
     confidenceThreshold: Float,
@@ -160,6 +163,19 @@ class YOLOParser {
           maxNSFWScores[2], maxNSFWPredIdx[2],
           maxNSFWScores[3], maxNSFWPredIdx[3],
           maxNSFWScores[4], maxNSFWPredIdx[4])
+
+    // Store debug info for retrieval via JS bridge
+    lastDebugInfo = [
+      "maxNSFWScores": [
+        "BUTTOCKS_EXPOSED": maxNSFWScores[0],
+        "FEMALE_BREAST_EXPOSED": maxNSFWScores[1],
+        "FEMALE_GENITALIA_EXPOSED": maxNSFWScores[2],
+        "ANUS_EXPOSED": maxNSFWScores[3],
+        "MALE_GENITALIA_EXPOSED": maxNSFWScores[4]
+      ],
+      "numPredictions": numPredictions,
+      "detectionsBeforeNMS": detections.count
+    ]
 
     return detections
   }
