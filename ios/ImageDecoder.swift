@@ -137,6 +137,19 @@ class ImageDecoder {
       normalizedPixels[i * 3 + 2] = Float(pixelData[offset + 2]) / 255.0  // B
     }
 
+    // DEBUG: Log sample pixel values to verify preprocessing
+    // Log center pixel
+    let centerIdx = (height / 2) * width + (width / 2)
+    NSLog("[ImageDecoder] DEBUG center pixel RGB: %.3f, %.3f, %.3f",
+          normalizedPixels[centerIdx * 3], normalizedPixels[centerIdx * 3 + 1], normalizedPixels[centerIdx * 3 + 2])
+    // Log corner pixel (should be black padding area for non-square images)
+    let bottomRightIdx = (height - 1) * width + (width - 1)
+    NSLog("[ImageDecoder] DEBUG bottom-right pixel RGB: %.3f, %.3f, %.3f",
+          normalizedPixels[bottomRightIdx * 3], normalizedPixels[bottomRightIdx * 3 + 1], normalizedPixels[bottomRightIdx * 3 + 2])
+    // Log top-left pixel
+    NSLog("[ImageDecoder] DEBUG top-left pixel RGB: %.3f, %.3f, %.3f",
+          normalizedPixels[0], normalizedPixels[1], normalizedPixels[2])
+
     NSLog("[ImageDecoder] ✓ Decode complete")
     return DecodedImage(
       width: width,

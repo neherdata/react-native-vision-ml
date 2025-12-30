@@ -138,6 +138,29 @@ class YOLOParser {
     }
 
     NSLog("[YOLOParser] Parsed %d detections before NMS (threshold: %.2f)", detections.count, confidenceThreshold)
+
+    // DEBUG: Check NSFW class scores for first 100 predictions to understand model output
+    let nsfwClassIndices = [2, 3, 4, 6, 14]  // BUTTOCKS_EXPOSED, FEMALE_BREAST_EXPOSED, FEMALE_GENITALIA_EXPOSED, ANUS_EXPOSED, MALE_GENITALIA_EXPOSED
+    var maxNSFWScores: [Float] = Array(repeating: 0, count: 5)
+    var maxNSFWPredIdx: [Int] = Array(repeating: 0, count: 5)
+
+    for i in 0..<min(numPredictions, 2100) {
+      for (idx, classIdx) in nsfwClassIndices.enumerated() {
+        let score = output[(4 + classIdx) * numPredictions + i]
+        if score > maxNSFWScores[idx] {
+          maxNSFWScores[idx] = score
+          maxNSFWPredIdx[idx] = i
+        }
+      }
+    }
+
+    NSLog("[YOLOParser] DEBUG Max NSFW scores: BUTTOCKS=%.4f(pred %d), BREAST=%.4f(pred %d), F_GEN=%.4f(pred %d), ANUS=%.4f(pred %d), M_GEN=%.4f(pred %d)",
+          maxNSFWScores[0], maxNSFWPredIdx[0],
+          maxNSFWScores[1], maxNSFWPredIdx[1],
+          maxNSFWScores[2], maxNSFWPredIdx[2],
+          maxNSFWScores[3], maxNSFWPredIdx[3],
+          maxNSFWScores[4], maxNSFWPredIdx[4])
+
     return detections
   }
 }
