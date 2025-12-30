@@ -24,11 +24,16 @@ Pod::Spec.new do |s|
   # Swift support
   s.swift_version = "5.0"
 
+  # Custom module map to provide onnxruntime_objc module for Swift
+  s.preserve_paths = 'ios/onnxruntime_objc.modulemap'
+
   # Build settings for Swift/ObjC interop with onnxruntime-objc
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     'CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES' => 'YES',
-    'SWIFT_INCLUDE_PATHS' => '$(PODS_TARGET_SRCROOT)/ios'
+    # Point Swift to our custom module map and onnxruntime headers
+    'SWIFT_INCLUDE_PATHS' => '$(PODS_TARGET_SRCROOT)/ios $(PODS_ROOT)/onnxruntime-objc/objectivec/include',
+    'HEADER_SEARCH_PATHS' => '$(inherited) $(PODS_ROOT)/onnxruntime-objc/objectivec/include'
   }
 
   # User target needs these settings too
