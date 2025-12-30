@@ -103,6 +103,44 @@ class YOLOParser {
       // Skip low confidence predictions (NudeNet uses 0.2 threshold)
       if confidence < confidenceThreshold { continue }
 
+      // ALSO check NSFW classes specifically - they may not be the "best" class
+      // but we still want to detect them if above threshold
+      // NSFW classes: 2=BUTTOCKS_EXPOSED, 3=FEMALE_BREAST_EXPOSED, 4=FEMALE_GENITALIA_EXPOSED,
+      //               6=ANUS_EXPOSED, 14=MALE_GENITALIA_EXPOSED
+      let nsfwIndices = [2, 3, 4, 6, 14]
+      for nsfwIdx in nsfwIndices {
+        let nsfwScore = output[(4 + nsfwIdx) * numPredictions + i]
+        if nsfwScore >= confidenceThreshold && nsfwIdx != bestClassIdx {
+          // This prediction has an NSFW class above threshold that isn't the best class
+          // Add it as a separate detection
+          var nx1 = cx - w / 2
+          var ny1 = cy - h / 2
+          var nx2 = cx + w / 2
+          var ny2 = cy + h / 2
+
+          nx1 = nx1 * scaleX
+          ny1 = ny1 * scaleY
+          nx2 = nx2 * scaleX
+          ny2 = ny2 * scaleY
+
+          nx1 = max(0, min(nx1, Float(originalWidth)))
+          ny1 = max(0, min(ny1, Float(originalHeight)))
+          nx2 = max(0, min(nx2, Float(originalWidth)))
+          ny2 = max(0, min(ny2, Float(originalHeight)))
+
+          if nx2 > nx1 && ny2 > ny1 {
+            NSLog("[YOLOParser] Found NSFW class %@ with score %.3f (best class was %@ with %.3f)",
+                  classLabels[nsfwIdx], nsfwScore, classLabels[bestClassIdx], maxClassScore)
+            detections.append(NMS.Detection(
+              box: [nx1, ny1, nx2, ny2],
+              score: nsfwScore,
+              classIndex: nsfwIdx,
+              className: classLabels[nsfwIdx]
+            ))
+          }
+        }
+      }
+
       // Convert center coordinates to corner format
       var x1 = cx - w / 2
       var y1 = cy - h / 2
@@ -138,6 +176,49 @@ class YOLOParser {
       ))
 
       detectionCount += 1
+    }
+
+    // Second pass: Check ALL predictions for NSFW classes above threshold
+    // This catches cases where NSFW score is high but not the max class
+    let nsfwClassIndicesForSecondPass = [2, 3, 4, 6, 14]
+    let nsfwClassNames = ["BUTTOCKS_EXPOSED", "FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_EXPOSED",
+                          "ANUS_EXPOSED", "MALE_GENITALIA_EXPOSED"]
+
+    for i in 0..<numPredictions {
+      let cx = output[0 * numPredictions + i]
+      let cy = output[1 * numPredictions + i]
+      let w = output[2 * numPredictions + i]
+      let h = output[3 * numPredictions + i]
+
+      for (idx, nsfwIdx) in nsfwClassIndicesForSecondPass.enumerated() {
+        let nsfwScore = output[(4 + nsfwIdx) * numPredictions + i]
+        if nsfwScore >= confidenceThreshold {
+          var nx1 = cx - w / 2
+          var ny1 = cy - h / 2
+          var nx2 = cx + w / 2
+          var ny2 = cy + h / 2
+
+          nx1 = nx1 * scaleX
+          ny1 = ny1 * scaleY
+          nx2 = nx2 * scaleX
+          ny2 = ny2 * scaleY
+
+          nx1 = max(0, min(nx1, Float(originalWidth)))
+          ny1 = max(0, min(ny1, Float(originalHeight)))
+          nx2 = max(0, min(nx2, Float(originalWidth)))
+          ny2 = max(0, min(ny2, Float(originalHeight)))
+
+          if nx2 > nx1 && ny2 > ny1 {
+            NSLog("[YOLOParser] NSFW Second Pass: %@ score=%.3f at pred %d", nsfwClassNames[idx], nsfwScore, i)
+            detections.append(NMS.Detection(
+              box: [nx1, ny1, nx2, ny2],
+              score: nsfwScore,
+              classIndex: nsfwIdx,
+              className: classLabels[nsfwIdx]
+            ))
+          }
+        }
+      }
     }
 
     NSLog("[YOLOParser] Parsed %d detections before NMS (threshold: %.2f)", detections.count, confidenceThreshold)
