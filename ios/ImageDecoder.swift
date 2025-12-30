@@ -72,21 +72,21 @@ class ImageDecoder {
     let originalHeight = cgImage.height
     NSLog("[ImageDecoder] Original image dimensions: %d x %d", originalWidth, originalHeight)
 
-    // Resize if needed
+    // Letterbox resize (pad to square, then resize) - matches NudeNet preprocessing
     let resizedImage: CGImage
     let width: Int
     let height: Int
 
-    if targetSize > 0 && (originalWidth != targetSize || originalHeight != targetSize) {
-      NSLog("[ImageDecoder] Resizing to %d x %d using hardware-accelerated CGContext...", targetSize, targetSize)
-      guard let resized = resize(image: cgImage, targetWidth: targetSize, targetHeight: targetSize) else {
-        NSLog("[ImageDecoder] ERROR: Failed to resize image")
+    if targetSize > 0 {
+      NSLog("[ImageDecoder] Letterbox resizing to %d x %d...", targetSize, targetSize)
+      guard let letterboxed = letterboxResize(image: cgImage, targetSize: targetSize) else {
+        NSLog("[ImageDecoder] ERROR: Failed to letterbox resize image")
         throw DecodeError.failedToResize
       }
-      resizedImage = resized
+      resizedImage = letterboxed
       width = targetSize
       height = targetSize
-      NSLog("[ImageDecoder] ✓ Resize complete: %d x %d", width, height)
+      NSLog("[ImageDecoder] ✓ Letterbox resize complete: %d x %d", width, height)
     } else {
       resizedImage = cgImage
       width = originalWidth
@@ -147,23 +147,64 @@ class ImageDecoder {
     )
   }
 
-  /// Hardware-accelerated image resize using CGContext
-  private static func resize(image: CGImage, targetWidth: Int, targetHeight: Int) -> CGImage? {
+  /// Letterbox resize: pad image to square, then resize to target size
+  /// This matches NudeNet's preprocessing which preserves aspect ratio
+  private static func letterboxResize(image: CGImage, targetSize: Int) -> CGImage? {
+    let originalWidth = image.width
+    let originalHeight = image.height
+
+    // Find the max dimension for square padding
+    let maxDim = max(originalWidth, originalHeight)
+
+    // Calculate padding (NudeNet pads on right and bottom)
+    let xPad = maxDim - originalWidth
+    let yPad = maxDim - originalHeight
+
+    NSLog("[ImageDecoder] Letterbox: original %dx%d, maxDim %d, pad x=%d y=%d",
+          originalWidth, originalHeight, maxDim, xPad, yPad)
+
     guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
-      NSLog("[ImageDecoder] ERROR: Failed to create sRGB colorspace for resize")
+      NSLog("[ImageDecoder] ERROR: Failed to create sRGB colorspace")
       return nil
     }
 
     let bytesPerPixel = 4
-    let bytesPerRow = targetWidth * bytesPerPixel
     let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
 
-    guard let context = CGContext(
+    // Step 1: Create padded square image (black background)
+    guard let paddedContext = CGContext(
       data: nil,
-      width: targetWidth,
-      height: targetHeight,
+      width: maxDim,
+      height: maxDim,
       bitsPerComponent: 8,
-      bytesPerRow: bytesPerRow,
+      bytesPerRow: maxDim * bytesPerPixel,
+      space: colorSpace,
+      bitmapInfo: bitmapInfo
+    ) else {
+      NSLog("[ImageDecoder] ERROR: Failed to create padded context")
+      return nil
+    }
+
+    // Fill with black (padding color)
+    paddedContext.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
+    paddedContext.fill(CGRect(x: 0, y: 0, width: maxDim, height: maxDim))
+
+    // Draw original image at top-left (NudeNet style: padding on right and bottom)
+    // Note: CGContext has origin at bottom-left, so we draw at (0, yPad) to pad bottom
+    paddedContext.draw(image, in: CGRect(x: 0, y: yPad, width: originalWidth, height: originalHeight))
+
+    guard let paddedImage = paddedContext.makeImage() else {
+      NSLog("[ImageDecoder] ERROR: Failed to create padded image")
+      return nil
+    }
+
+    // Step 2: Resize padded square to target size
+    guard let resizeContext = CGContext(
+      data: nil,
+      width: targetSize,
+      height: targetSize,
+      bitsPerComponent: 8,
+      bytesPerRow: targetSize * bytesPerPixel,
       space: colorSpace,
       bitmapInfo: bitmapInfo
     ) else {
@@ -171,9 +212,9 @@ class ImageDecoder {
       return nil
     }
 
-    context.interpolationQuality = .high
-    context.draw(image, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+    resizeContext.interpolationQuality = .high
+    resizeContext.draw(paddedImage, in: CGRect(x: 0, y: 0, width: targetSize, height: targetSize))
 
-    return context.makeImage()
+    return resizeContext.makeImage()
   }
 }
