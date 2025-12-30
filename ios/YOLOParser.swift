@@ -45,6 +45,14 @@ class YOLOParser {
     NSLog("[YOLOParser] Output size: %d, valuesPerPrediction: %d, numPredictions: %d",
           output.count, valuesPerPrediction, numPredictions)
 
+    // DEBUG: Log first few raw output values to verify tensor format
+    if output.count > 50 {
+      NSLog("[YOLOParser] First 10 values (should be cx for first 10 preds): %@",
+            output[0..<10].map { String(format: "%.2f", $0) }.joined(separator: ", "))
+      NSLog("[YOLOParser] Values at prediction 0 [cx,cy,w,h,c0,c1,c2]: %@",
+            (0..<7).map { output[$0 * numPredictions] }.map { String(format: "%.3f", $0) }.joined(separator: ", "))
+    }
+
     // NudeNet uses letterboxing (padding to square) then resize
     // The output coordinates are relative to the padded square image
     // We need to scale back to original image dimensions
