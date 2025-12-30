@@ -1,6 +1,6 @@
 #import "ONNXWrapper.h"
-#include <onnxruntime_cxx_api.h>
-#include <coreml_provider_factory.h>
+#include "onnxruntime/coreml_provider_factory.h"
+#include <onnxruntime/onnxruntime_cxx_api.h>
 #include <vector>
 
 @interface ONNXWrapper () {
