@@ -35,13 +35,8 @@ class ONNXInference {
     NSLog("[ONNXInference] Loading model from: %@", modelPath)
 
     do {
-      var error: NSError?
-      wrapper = ONNXWrapper(modelPath: modelPath, error: &error)
-
-      if let error = error {
-        NSLog("[ONNXInference] ERROR: Failed to load model: %@", error.localizedDescription)
-        throw InferenceError.sessionCreationFailed
-      }
+      // Swift auto-bridges ObjC (NSError **) parameter to throwing function
+      wrapper = try ONNXWrapper(modelPath: modelPath)
 
       guard wrapper?.isModelLoaded == true else {
         throw InferenceError.sessionCreationFailed
@@ -93,11 +88,13 @@ class ONNXInference {
     let inputData = tensorData.map { NSNumber(value: $0) }
     let inputShape: [NSNumber] = [1, 3, NSNumber(value: inputSize), NSNumber(value: inputSize)]
 
-    var error: NSError?
-    guard let outputArray = wrapper.runInference(withInputData: inputData, inputShape: inputShape, error: &error) else {
-      let errorMsg = error?.localizedDescription ?? "Unknown inference error"
-      NSLog("[ONNXInference] ERROR: Inference failed: %@", errorMsg)
-      throw InferenceError.inferenceFailedNot(errorMsg)
+    let outputArray: [NSNumber]
+    do {
+      // Swift auto-bridges ObjC (NSError **) parameter to throwing function
+      outputArray = try wrapper.runInference(withInputData: inputData, inputShape: inputShape)
+    } catch {
+      NSLog("[ONNXInference] ERROR: Inference failed: %@", error.localizedDescription)
+      throw InferenceError.inferenceFailedNot(error.localizedDescription)
     }
 
     let inferenceTime = Int(Date().timeIntervalSince(inferenceStart) * 1000)
