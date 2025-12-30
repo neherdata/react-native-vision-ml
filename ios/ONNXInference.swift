@@ -115,9 +115,23 @@ class ONNXInference {
       originalHeight: originalHeight
     )
 
-    // Step 5: Apply NMS
+    // Step 5: Apply NMS to general detections
     NSLog("[ONNXInference] Step 5: Applying NMS...")
-    let finalDetections = NMS.apply(detections: rawDetections, iouThreshold: iouThreshold)
+    let generalDetections = NMS.apply(detections: rawDetections, iouThreshold: iouThreshold)
+
+    // Step 6: Parse NSFW classes separately (to avoid face detections suppressing NSFW)
+    NSLog("[ONNXInference] Step 6: Parsing NSFW classes separately...")
+    let nsfwDetections = parser.parseNSFWOnly(
+      output: floatArray,
+      confidenceThreshold: confidenceThreshold,
+      originalWidth: originalWidth,
+      originalHeight: originalHeight
+    )
+
+    // Combine: general detections + NSFW-specific detections
+    let finalDetections = generalDetections + nsfwDetections
+    NSLog("[ONNXInference] Combined: %d general + %d NSFW = %d total",
+          generalDetections.count, nsfwDetections.count, finalDetections.count)
 
     let postProcessTime = Int(Date().timeIntervalSince(postProcessStart) * 1000)
     let totalTime = Int(Date().timeIntervalSince(totalStart) * 1000)

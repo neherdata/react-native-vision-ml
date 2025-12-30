@@ -184,59 +184,6 @@ class YOLOParser {
     let nsfwClassNames = ["BUTTOCKS_EXPOSED", "FEMALE_BREAST_EXPOSED", "FEMALE_GENITALIA_EXPOSED",
                           "ANUS_EXPOSED", "MALE_GENITALIA_EXPOSED"]
 
-    var nsfwFoundCount = 0
-    for i in 0..<numPredictions {
-      let cx = output[0 * numPredictions + i]
-      let cy = output[1 * numPredictions + i]
-      let w = output[2 * numPredictions + i]
-      let h = output[3 * numPredictions + i]
-
-      for (idx, nsfwIdx) in nsfwClassIndicesForSecondPass.enumerated() {
-        let nsfwScore = output[(4 + nsfwIdx) * numPredictions + i]
-        if nsfwScore >= confidenceThreshold {
-          nsfwFoundCount += 1
-
-          var nx1 = cx - w / 2
-          var ny1 = cy - h / 2
-          var nx2 = cx + w / 2
-          var ny2 = cy + h / 2
-
-          // Log raw coords before scaling
-          if nsfwFoundCount <= 5 {
-            NSLog("[YOLOParser] NSFW raw: %@ score=%.3f pred=%d cx=%.1f cy=%.1f w=%.1f h=%.1f",
-                  nsfwClassNames[idx], nsfwScore, i, cx, cy, w, h)
-          }
-
-          nx1 = nx1 * scaleX
-          ny1 = ny1 * scaleY
-          nx2 = nx2 * scaleX
-          ny2 = ny2 * scaleY
-
-          let beforeClipX1 = nx1, beforeClipY1 = ny1, beforeClipX2 = nx2, beforeClipY2 = ny2
-
-          nx1 = max(0, min(nx1, Float(originalWidth)))
-          ny1 = max(0, min(ny1, Float(originalHeight)))
-          nx2 = max(0, min(nx2, Float(originalWidth)))
-          ny2 = max(0, min(ny2, Float(originalHeight)))
-
-          if nx2 > nx1 && ny2 > ny1 {
-            NSLog("[YOLOParser] NSFW Second Pass: %@ score=%.3f at pred %d box=[%.0f,%.0f,%.0f,%.0f]",
-                  nsfwClassNames[idx], nsfwScore, i, nx1, ny1, nx2, ny2)
-            detections.append(NMS.Detection(
-              box: [nx1, ny1, nx2, ny2],
-              score: nsfwScore,
-              classIndex: nsfwIdx,
-              className: classLabels[nsfwIdx]
-            ))
-          } else if nsfwFoundCount <= 5 {
-            NSLog("[YOLOParser] NSFW REJECTED (bad box): %@ score=%.3f before=[%.0f,%.0f,%.0f,%.0f] after=[%.0f,%.0f,%.0f,%.0f]",
-                  nsfwClassNames[idx], nsfwScore, beforeClipX1, beforeClipY1, beforeClipX2, beforeClipY2, nx1, ny1, nx2, ny2)
-          }
-        }
-      }
-    }
-    NSLog("[YOLOParser] Second pass found %d NSFW scores >= threshold", nsfwFoundCount)
-
     NSLog("[YOLOParser] Parsed %d detections before NMS (threshold: %.2f)", detections.count, confidenceThreshold)
 
     // DEBUG: Check NSFW class scores for first 100 predictions to understand model output
@@ -275,5 +222,64 @@ class YOLOParser {
     ]
 
     return detections
+  }
+
+  /// Parse ONLY NSFW classes from output - separate from main detection to avoid NMS suppression
+  func parseNSFWOnly(
+    output: [Float],
+    confidenceThreshold: Float,
+    originalWidth: Int,
+    originalHeight: Int
+  ) -> [NMS.Detection] {
+    var nsfwDetections: [NMS.Detection] = []
+
+    let valuesPerPrediction = 4 + numClasses
+    let numPredictions = output.count / valuesPerPrediction
+
+    let maxDim = max(originalWidth, originalHeight)
+    let scaleX = Float(maxDim) / Float(inputSize)
+    let scaleY = Float(maxDim) / Float(inputSize)
+
+    // NSFW class indices: 2=BUTTOCKS, 3=BREAST, 4=F_GENITALIA, 6=ANUS, 14=M_GENITALIA
+    let nsfwIndices = [2, 3, 4, 6, 14]
+
+    for i in 0..<numPredictions {
+      let cx = output[0 * numPredictions + i]
+      let cy = output[1 * numPredictions + i]
+      let w = output[2 * numPredictions + i]
+      let h = output[3 * numPredictions + i]
+
+      for nsfwIdx in nsfwIndices {
+        let nsfwScore = output[(4 + nsfwIdx) * numPredictions + i]
+        if nsfwScore >= confidenceThreshold {
+          var x1 = (cx - w / 2) * scaleX
+          var y1 = (cy - h / 2) * scaleY
+          var x2 = (cx + w / 2) * scaleX
+          var y2 = (cy + h / 2) * scaleY
+
+          x1 = max(0, min(x1, Float(originalWidth)))
+          y1 = max(0, min(y1, Float(originalHeight)))
+          x2 = max(0, min(x2, Float(originalWidth)))
+          y2 = max(0, min(y2, Float(originalHeight)))
+
+          if x2 > x1 && y2 > y1 {
+            nsfwDetections.append(NMS.Detection(
+              box: [x1, y1, x2, y2],
+              score: nsfwScore,
+              classIndex: nsfwIdx,
+              className: classLabels[nsfwIdx]
+            ))
+          }
+        }
+      }
+    }
+
+    NSLog("[YOLOParser] NSFW-only pass found %d detections before NMS", nsfwDetections.count)
+
+    // Apply NMS only among NSFW detections (not competing with faces)
+    let nsfwFiltered = NMS.apply(detections: nsfwDetections, iouThreshold: 0.45)
+    NSLog("[YOLOParser] NSFW after NMS: %d detections", nsfwFiltered.count)
+
+    return nsfwFiltered
   }
 }
