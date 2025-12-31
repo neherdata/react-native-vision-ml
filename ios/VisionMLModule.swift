@@ -360,6 +360,7 @@ class VisionMLModule: NSObject {
 
   private func performComprehensiveAnalysis(cgImage: CGImage, completion: @escaping ([String: Any]) -> Void) {
     var result: [String: Any] = [:]
+    let resultQueue = DispatchQueue(label: "com.visionml.result", attributes: .concurrent)
     let group = DispatchGroup()
 
     // Scene Classification
@@ -376,7 +377,9 @@ class VisionMLModule: NSObject {
         .prefix(10)
         .map { ["identifier": $0.identifier, "confidence": $0.confidence] }
 
-      result["scenes"] = scenes
+      resultQueue.async(flags: .barrier) {
+        result["scenes"] = scenes
+      }
     }
 
     // Face Detection
@@ -400,8 +403,10 @@ class VisionMLModule: NSObject {
         ]
       }
 
-      result["faces"] = faces
-      result["faceCount"] = faces.count
+      resultQueue.async(flags: .barrier) {
+        result["faces"] = faces
+        result["faceCount"] = faces.count
+      }
     }
 
     // Animal Detection
@@ -433,8 +438,10 @@ class VisionMLModule: NSObject {
         ]
       }
 
-      result["animals"] = animals
-      result["animalCount"] = animals.count
+      resultQueue.async(flags: .barrier) {
+        result["animals"] = animals
+        result["animalCount"] = animals.count
+      }
     }
 
     // Human Pose Detection
@@ -446,8 +453,10 @@ class VisionMLModule: NSObject {
         return
       }
 
-      result["humanCount"] = observations.count
-      result["hasHumans"] = observations.count > 0
+      resultQueue.async(flags: .barrier) {
+        result["humanCount"] = observations.count
+        result["hasHumans"] = observations.count > 0
+      }
     }
 
     // Text Detection
@@ -459,8 +468,10 @@ class VisionMLModule: NSObject {
         return
       }
 
-      result["hasText"] = observations.count > 0
-      result["textRegions"] = observations.count
+      resultQueue.async(flags: .barrier) {
+        result["hasText"] = observations.count > 0
+        result["textRegions"] = observations.count
+      }
     }
 
     // Rectangle Detection (for screenshots)
@@ -473,8 +484,10 @@ class VisionMLModule: NSObject {
       }
 
       let rectangleCount = observations.count
-      result["rectangles"] = rectangleCount
-      result["likelyScreenshot"] = rectangleCount > 5
+      resultQueue.async(flags: .barrier) {
+        result["rectangles"] = rectangleCount
+        result["likelyScreenshot"] = rectangleCount > 5
+      }
     }
 
     // Execute all requests
@@ -494,7 +507,10 @@ class VisionMLModule: NSObject {
 
     // Wait for all requests to complete
     group.notify(queue: .main) {
-      completion(result)
+      // Ensure all barrier writes have completed before reading
+      resultQueue.sync(flags: .barrier) {
+        completion(result)
+      }
     }
   }
 

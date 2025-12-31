@@ -51,6 +51,8 @@ class ONNXInference {
   }
 
   /// Run full inference pipeline: decode → inference → parse → NMS
+  /// Matches NudeNet Python processing exactly
+  ///
   /// - Parameters:
   ///   - imageUri: file:// URI to image
   ///   - confidenceThreshold: Minimum confidence score (default 0.6)
@@ -69,13 +71,12 @@ class ONNXInference {
       throw InferenceError.modelNotLoaded
     }
 
-    // Step 1: Decode and resize image
+    // Step 1: Decode and resize image (with letterbox padding like NudeNet Python)
     NSLog("[ONNXInference] Step 1: Decoding image...")
     let decoded = try ImageDecoder.decode(imageUri: imageUri, targetSize: inputSize)
-    // Use the ORIGINAL dimensions for coordinate scaling, not the resized dimensions
     let originalWidth = decoded.originalWidth
     let originalHeight = decoded.originalHeight
-    NSLog("[ONNXInference] Original dimensions for scaling: %d x %d", originalWidth, originalHeight)
+    NSLog("[ONNXInference] Original dimensions: %d x %d", originalWidth, originalHeight)
 
     // Step 2: Convert to NCHW format for ONNX
     NSLog("[ONNXInference] Step 2: Converting to NCHW tensor format...")
@@ -85,13 +86,11 @@ class ONNXInference {
     NSLog("[ONNXInference] Step 3: Running ONNX inference...")
     let inferenceStart = Date()
 
-    // Convert to NSNumber arrays for ObjC interop
     let inputData = tensorData.map { NSNumber(value: $0) }
     let inputShape: [NSNumber] = [1, 3, NSNumber(value: inputSize), NSNumber(value: inputSize)]
 
     let outputArray: [NSNumber]
     do {
-      // Swift auto-bridges ObjC (NSError **) parameter to throwing function
       outputArray = try wrapper.runInference(withInputData: inputData, inputShape: inputShape)
     } catch {
       NSLog("[ONNXInference] ERROR: Inference failed: %@", error.localizedDescription)
@@ -101,13 +100,13 @@ class ONNXInference {
     let inferenceTime = Int(Date().timeIntervalSince(inferenceStart) * 1000)
     NSLog("[ONNXInference] ✓ Inference complete in %dms", inferenceTime)
 
-    // Step 4: Parse YOLO output
+    // Step 4: Parse YOLO output (matches NudeNet Python _postprocess)
     NSLog("[ONNXInference] Step 4: Parsing YOLO output...")
     let postProcessStart = Date()
 
-    // Convert NSNumber array back to Float array
     let floatArray = outputArray.map { $0.floatValue }
 
+    // Parse using standard best-class-per-prediction (like NudeNet Python)
     let rawDetections = parser.parse(
       output: floatArray,
       confidenceThreshold: confidenceThreshold,
@@ -115,23 +114,43 @@ class ONNXInference {
       originalHeight: originalHeight
     )
 
-    // Step 5: Apply NMS to general detections
-    NSLog("[ONNXInference] Step 5: Applying NMS...")
-    let generalDetections = NMS.apply(detections: rawDetections, iouThreshold: iouThreshold)
+    // Step 5: Apply NMS (matches NudeNet Python cv2.dnn.NMSBoxes)
+    NSLog("[ONNXInference] Step 5: Applying NMS with IoU threshold %.2f...", iouThreshold)
+    let filteredDetections = NMS.apply(detections: rawDetections, iouThreshold: iouThreshold)
 
-    // Step 6: Parse NSFW classes separately (to avoid face detections suppressing NSFW)
-    NSLog("[ONNXInference] Step 6: Parsing NSFW classes separately...")
-    let nsfwDetections = parser.parseNSFWOnly(
+    // Step 6: ALSO get all-class detections for NSFW that might be suppressed
+    // This catches NSFW when face has higher score at same location
+    NSLog("[ONNXInference] Step 6: Parsing all classes for NSFW recovery...")
+    let allClassDetections = parser.parseAllClasses(
       output: floatArray,
       confidenceThreshold: confidenceThreshold,
       originalWidth: originalWidth,
       originalHeight: originalHeight
     )
 
-    // Combine: general detections + NSFW-specific detections
-    let finalDetections = generalDetections + nsfwDetections
-    NSLog("[ONNXInference] Combined: %d general + %d NSFW = %d total",
-          generalDetections.count, nsfwDetections.count, finalDetections.count)
+    // Filter to only NSFW classes from the all-class parse
+    let nsfwClassIndices = Set([2, 3, 4, 6, 14])
+    let nsfwFromAllClass = allClassDetections.filter { nsfwClassIndices.contains($0.classIndex) }
+
+    // Apply NMS to NSFW-only detections (separate from faces)
+    let nsfwFiltered = NMS.apply(detections: nsfwFromAllClass, iouThreshold: iouThreshold)
+
+    // Combine: standard detections + NSFW-specific detections
+    // Remove duplicates by checking if NSFW detection already exists in filtered
+    var finalDetections = filteredDetections
+    for nsfwDet in nsfwFiltered {
+      let isDuplicate = finalDetections.contains { existing in
+        existing.classIndex == nsfwDet.classIndex &&
+        abs(existing.box[0] - nsfwDet.box[0]) < 10 &&
+        abs(existing.box[1] - nsfwDet.box[1]) < 10
+      }
+      if !isDuplicate {
+        finalDetections.append(nsfwDet)
+      }
+    }
+
+    NSLog("[ONNXInference] Final: %d standard + %d NSFW-recovered = %d total",
+          filteredDetections.count, nsfwFiltered.count, finalDetections.count)
 
     let postProcessTime = Int(Date().timeIntervalSince(postProcessStart) * 1000)
     let totalTime = Int(Date().timeIntervalSince(totalStart) * 1000)

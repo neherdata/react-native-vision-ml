@@ -68,9 +68,36 @@ class ImageDecoder {
       throw DecodeError.failedToGetCGImage
     }
 
-    let originalWidth = cgImage.width
-    let originalHeight = cgImage.height
-    NSLog("[ImageDecoder] Original image dimensions: %d x %d", originalWidth, originalHeight)
+    // IMPORTANT: Use UIImage.size for dimensions, NOT cgImage.width/height!
+    // cgImage gives raw pixel dimensions ignoring EXIF orientation
+    // UIImage.size gives display dimensions with orientation applied
+    // MediaLibrary also returns orientation-aware dimensions, so we must match
+    let originalWidth = Int(image.size.width)
+    let originalHeight = Int(image.size.height)
+    let rawWidth = cgImage.width
+    let rawHeight = cgImage.height
+    NSLog("[ImageDecoder] Original dimensions (display): %d x %d, raw CGImage: %d x %d",
+          originalWidth, originalHeight, rawWidth, rawHeight)
+
+    // Check if orientation differs from raw
+    if originalWidth != rawWidth || originalHeight != rawHeight {
+      NSLog("[ImageDecoder] ⚠️ Image has EXIF rotation - using display dimensions for coordinates")
+    }
+
+    // First, render the UIImage to a new CGImage with orientation applied
+    // This ensures the pixel data matches the display orientation
+    let orientedImage: CGImage
+    if originalWidth != rawWidth || originalHeight != rawHeight {
+      NSLog("[ImageDecoder] Rendering with orientation correction...")
+      guard let oriented = renderWithOrientation(image: image) else {
+        NSLog("[ImageDecoder] ERROR: Failed to render with orientation")
+        throw DecodeError.failedToResize
+      }
+      orientedImage = oriented
+      NSLog("[ImageDecoder] ✓ Orientation corrected: %d x %d", orientedImage.width, orientedImage.height)
+    } else {
+      orientedImage = cgImage
+    }
 
     // Letterbox resize (pad to square, then resize) - matches NudeNet preprocessing
     let resizedImage: CGImage
@@ -79,7 +106,7 @@ class ImageDecoder {
 
     if targetSize > 0 {
       NSLog("[ImageDecoder] Letterbox resizing to %d x %d...", targetSize, targetSize)
-      guard let letterboxed = letterboxResize(image: cgImage, targetSize: targetSize) else {
+      guard let letterboxed = letterboxResize(image: orientedImage, targetSize: targetSize) else {
         NSLog("[ImageDecoder] ERROR: Failed to letterbox resize image")
         throw DecodeError.failedToResize
       }
@@ -88,7 +115,7 @@ class ImageDecoder {
       height = targetSize
       NSLog("[ImageDecoder] ✓ Letterbox resize complete: %d x %d", width, height)
     } else {
-      resizedImage = cgImage
+      resizedImage = orientedImage
       width = originalWidth
       height = originalHeight
       NSLog("[ImageDecoder] Using original dimensions: %d x %d", width, height)
@@ -161,19 +188,29 @@ class ImageDecoder {
   }
 
   /// Letterbox resize: pad image to square, then resize to target size
-  /// This matches NudeNet's preprocessing which preserves aspect ratio
+  /// NudeNet pads on RIGHT and BOTTOM (image at top-left corner)
   private static func letterboxResize(image: CGImage, targetSize: Int) -> CGImage? {
     let originalWidth = image.width
     let originalHeight = image.height
 
+    // Safety check for extremely large images that might cause memory issues
+    let maxAllowedDimension = 8192
+    guard originalWidth > 0 && originalHeight > 0 &&
+          originalWidth <= maxAllowedDimension && originalHeight <= maxAllowedDimension else {
+      NSLog("[ImageDecoder] ERROR: Image dimensions invalid or too large: %dx%d (max %d)",
+            originalWidth, originalHeight, maxAllowedDimension)
+      return nil
+    }
+
     // Find the max dimension for square padding
     let maxDim = max(originalWidth, originalHeight)
 
-    // Calculate padding (NudeNet pads on right and bottom)
-    let xPad = maxDim - originalWidth
-    let yPad = maxDim - originalHeight
+    // NudeNet pads on right and bottom: cv2.copyMakeBorder(img, 0, y_pad, 0, x_pad, ...)
+    // This means image is at TOP-LEFT, padding on RIGHT and BOTTOM
+    let xPad = maxDim - originalWidth  // Padding on right
+    let yPad = maxDim - originalHeight  // Padding on bottom
 
-    NSLog("[ImageDecoder] Letterbox: original %dx%d, maxDim %d, pad x=%d y=%d",
+    NSLog("[ImageDecoder] Letterbox (right/bottom pad): original %dx%d, maxDim %d, pad right=%d bottom=%d",
           originalWidth, originalHeight, maxDim, xPad, yPad)
 
     guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
@@ -202,8 +239,8 @@ class ImageDecoder {
     paddedContext.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
     paddedContext.fill(CGRect(x: 0, y: 0, width: maxDim, height: maxDim))
 
-    // Draw original image at top-left (NudeNet style: padding on right and bottom)
-    // Note: CGContext has origin at bottom-left, so we draw at (0, yPad) to pad bottom
+    // Draw original image at TOP-LEFT (NudeNet style: padding on right and bottom)
+    // CGContext has origin at BOTTOM-left, so to put image at TOP, draw at y=yPad
     paddedContext.draw(image, in: CGRect(x: 0, y: yPad, width: originalWidth, height: originalHeight))
 
     guard let paddedImage = paddedContext.makeImage() else {
@@ -229,5 +266,40 @@ class ImageDecoder {
     resizeContext.draw(paddedImage, in: CGRect(x: 0, y: 0, width: targetSize, height: targetSize))
 
     return resizeContext.makeImage()
+  }
+
+  /// Render UIImage to CGImage with orientation applied
+  /// This ensures the CGImage pixel data matches the display orientation
+  private static func renderWithOrientation(image: UIImage) -> CGImage? {
+    let width = Int(image.size.width)
+    let height = Int(image.size.height)
+
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+      NSLog("[ImageDecoder] ERROR: Failed to create sRGB colorspace for orientation")
+      return nil
+    }
+
+    let bytesPerPixel = 4
+    let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+
+    guard let context = CGContext(
+      data: nil,
+      width: width,
+      height: height,
+      bitsPerComponent: 8,
+      bytesPerRow: width * bytesPerPixel,
+      space: colorSpace,
+      bitmapInfo: bitmapInfo
+    ) else {
+      NSLog("[ImageDecoder] ERROR: Failed to create context for orientation")
+      return nil
+    }
+
+    // Draw UIImage - this automatically applies the orientation transform
+    UIGraphicsPushContext(context)
+    image.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+    UIGraphicsPopContext()
+
+    return context.makeImage()
   }
 }
