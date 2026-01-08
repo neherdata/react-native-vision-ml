@@ -89,12 +89,15 @@ class ImageDecoder {
     let orientedImage: CGImage
     if originalWidth != rawWidth || originalHeight != rawHeight {
       NSLog("[ImageDecoder] Rendering with orientation correction...")
-      guard let oriented = renderWithOrientation(image: image) else {
-        NSLog("[ImageDecoder] ERROR: Failed to render with orientation")
-        throw DecodeError.failedToResize
+      if let oriented = renderWithOrientation(image: image) {
+        orientedImage = oriented
+        NSLog("[ImageDecoder] ✓ Orientation corrected: %d x %d", orientedImage.width, orientedImage.height)
+      } else {
+        // Fallback: use original CGImage without orientation correction
+        // Better to have wrong orientation than fail completely
+        NSLog("[ImageDecoder] ⚠️ Orientation correction failed, using raw CGImage as fallback")
+        orientedImage = cgImage
       }
-      orientedImage = oriented
-      NSLog("[ImageDecoder] ✓ Orientation corrected: %d x %d", orientedImage.width, orientedImage.height)
     } else {
       orientedImage = cgImage
     }
@@ -106,14 +109,27 @@ class ImageDecoder {
 
     if targetSize > 0 {
       NSLog("[ImageDecoder] Letterbox resizing to %d x %d...", targetSize, targetSize)
-      guard let letterboxed = letterboxResize(image: orientedImage, targetSize: targetSize) else {
-        NSLog("[ImageDecoder] ERROR: Failed to letterbox resize image")
-        throw DecodeError.failedToResize
+      if let letterboxed = letterboxResize(image: orientedImage, targetSize: targetSize) {
+        resizedImage = letterboxed
+        width = targetSize
+        height = targetSize
+        NSLog("[ImageDecoder] ✓ Letterbox resize complete: %d x %d", width, height)
+      } else {
+        // Fallback: Try simple resize without letterboxing
+        NSLog("[ImageDecoder] ⚠️ Letterbox failed, trying simple resize fallback...")
+        if let simpleResized = simpleResize(image: orientedImage, targetSize: targetSize) {
+          resizedImage = simpleResized
+          width = targetSize
+          height = targetSize
+          NSLog("[ImageDecoder] ✓ Simple resize fallback complete: %d x %d", width, height)
+        } else {
+          // Last resort: use original image (model may get wrong input size but won't crash)
+          NSLog("[ImageDecoder] ⚠️ All resize methods failed, using original image as last resort")
+          resizedImage = orientedImage
+          width = orientedImage.width
+          height = orientedImage.height
+        }
       }
-      resizedImage = letterboxed
-      width = targetSize
-      height = targetSize
-      NSLog("[ImageDecoder] ✓ Letterbox resize complete: %d x %d", width, height)
     } else {
       resizedImage = orientedImage
       width = originalWidth
@@ -266,6 +282,36 @@ class ImageDecoder {
     resizeContext.draw(paddedImage, in: CGRect(x: 0, y: 0, width: targetSize, height: targetSize))
 
     return resizeContext.makeImage()
+  }
+
+  /// Simple resize without letterboxing - fallback when letterbox fails
+  /// This stretches the image to target size (less accurate but won't crash)
+  private static func simpleResize(image: CGImage, targetSize: Int) -> CGImage? {
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+      NSLog("[ImageDecoder] ERROR: Failed to create sRGB colorspace for simple resize")
+      return nil
+    }
+
+    let bytesPerPixel = 4
+    let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+
+    guard let context = CGContext(
+      data: nil,
+      width: targetSize,
+      height: targetSize,
+      bitsPerComponent: 8,
+      bytesPerRow: targetSize * bytesPerPixel,
+      space: colorSpace,
+      bitmapInfo: bitmapInfo
+    ) else {
+      NSLog("[ImageDecoder] ERROR: Failed to create context for simple resize")
+      return nil
+    }
+
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: targetSize, height: targetSize))
+
+    return context.makeImage()
   }
 
   /// Render UIImage to CGImage with orientation applied
