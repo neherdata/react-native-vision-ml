@@ -112,6 +112,190 @@ export async function disposeAllDetectors(): Promise<{ success: boolean }> {
   return VisionML.disposeAllDetectors();
 }
 
+// MARK: - Live Activity Types
+
+/**
+ * Result from starting a Live Activity
+ */
+export interface LiveActivityResult {
+  /** Activity ID if started successfully */
+  activityId: string | null;
+  /** Whether the activity was started */
+  success: boolean;
+}
+
+/**
+ * Check if Live Activities are available on this device
+ * Requires iOS 16.1+ and user permission
+ */
+export async function isLiveActivityAvailable(): Promise<boolean> {
+  return VisionML.isLiveActivityAvailable();
+}
+
+/**
+ * Start a Live Activity for video scanning
+ * Shows progress on Dynamic Island and Lock Screen
+ *
+ * @param videoName - Display name of the video
+ * @param videoDuration - Duration in seconds
+ * @param scanMode - Scan mode being used
+ * @returns Activity ID and success status
+ */
+export async function startVideoScanActivity(
+  videoName: string,
+  videoDuration: number,
+  scanMode: VideoScanMode
+): Promise<LiveActivityResult> {
+  return VisionML.startVideoScanActivity(videoName, videoDuration, scanMode);
+}
+
+/**
+ * Update Live Activity progress
+ *
+ * @param progress - Progress from 0.0 to 1.0
+ * @param phase - Current phase description
+ * @param nsfwCount - Number of NSFW frames found so far
+ * @param framesAnalyzed - Total frames analyzed so far
+ */
+export async function updateVideoScanActivity(
+  progress: number,
+  phase: string,
+  nsfwCount: number,
+  framesAnalyzed: number
+): Promise<boolean> {
+  return VisionML.updateVideoScanActivity(progress, phase, nsfwCount, framesAnalyzed);
+}
+
+/**
+ * End Live Activity with final results
+ *
+ * @param nsfwCount - Final count of NSFW frames
+ * @param framesAnalyzed - Total frames analyzed
+ * @param isNSFW - Whether any NSFW content was found
+ */
+export async function endVideoScanActivity(
+  nsfwCount: number,
+  framesAnalyzed: number,
+  isNSFW: boolean
+): Promise<boolean> {
+  return VisionML.endVideoScanActivity(nsfwCount, framesAnalyzed, isNSFW);
+}
+
+// MARK: - Video Analysis Types
+
+/**
+ * Video scan mode determines sampling strategy
+ */
+export type VideoScanMode =
+  | 'quick_check'         // Just check start, middle, end (3 frames, fastest)
+  | 'sampled'             // Check at regular intervals
+  | 'thorough'            // Vision human detection first, then ONNX only on human frames (best for newer devices)
+  | 'binary_search'       // Start at middle, expand outward (fallback for older devices)
+  | 'full_short_circuit'; // Check every N seconds, stop at first detection
+
+/**
+ * Result from video analysis
+ */
+export interface VideoAnalysisResult {
+  /** Whether any NSFW content was detected */
+  isNSFW: boolean;
+  /** Number of frames with NSFW content */
+  nsfwFrameCount: number;
+  /** Total frames that were analyzed */
+  totalFramesAnalyzed: number;
+  /** Timestamp of first NSFW frame (seconds), null if none found */
+  firstNSFWTimestamp: number | null;
+  /** All timestamps where NSFW was detected (seconds) */
+  nsfwTimestamps: number[];
+  /** Highest NSFW confidence score found */
+  highestConfidence: number;
+  /** Total processing time in milliseconds */
+  totalProcessingTime: number;
+  /** Video duration in seconds */
+  videoDuration: number;
+  /** Scan mode that was used */
+  scanMode: string;
+  /** Frames where Vision detected humans (thorough mode only) */
+  humanFramesDetected: number;
+}
+
+/**
+ * Options for video analysis
+ */
+export interface VideoAnalysisOptions {
+  /** Scan mode (default: 'sampled') */
+  mode?: VideoScanMode;
+  /** Seconds between samples for 'sampled' and 'full_short_circuit' modes (default: 5.0) */
+  sampleInterval?: number;
+  /** Minimum confidence threshold (default: 0.6) */
+  confidenceThreshold?: number;
+}
+
+/**
+ * Analyze a video for NSFW content
+ *
+ * Uses Apple Vision framework for human detection pre-filtering,
+ * then runs ONNX NSFW detection only on frames with humans.
+ * Memory-efficient: processes one frame at a time.
+ *
+ * Scan Modes:
+ * - 'quick_check': Just check start, middle, end (3 frames, fastest)
+ * - 'sampled': Sample at regular intervals, analyze all samples
+ * - 'thorough': Use Vision to find human frames first, then ONNX those (best for newer devices)
+ * - 'binary_search': Start at middle, expand when NSFW found (fallback for older devices)
+ * - 'full_short_circuit': Sample every N seconds, stop at first detection
+ *
+ * The 'thorough' mode is recommended for newer devices as it:
+ * 1. Uses fast Vision framework to scan all frames for humans (~10ms/frame)
+ * 2. Only runs expensive ONNX on frames with humans (~200ms/frame)
+ * 3. Can skip 60-90% of frames in typical videos
+ *
+ * Use 'binary_search' on older devices where Vision framework is slow.
+ *
+ * @param detectorId - Detector instance ID from createDetector()
+ * @param assetId - Video asset identifier from MediaLibrary
+ * @param options - Analysis options
+ * @returns Video analysis result with humanFramesDetected count
+ */
+export async function analyzeVideo(
+  detectorId: string,
+  assetId: string,
+  options: VideoAnalysisOptions = {}
+): Promise<VideoAnalysisResult> {
+  const {
+    mode = 'sampled',
+    sampleInterval = 5.0,
+    confidenceThreshold = 0.6
+  } = options;
+
+  return VisionML.analyzeVideo(
+    detectorId,
+    assetId,
+    mode,
+    sampleInterval,
+    confidenceThreshold
+  );
+}
+
+/**
+ * Quick check a video (start, middle, end only)
+ *
+ * Fastest video analysis - only checks 3 frames.
+ * Good for initial screening, may miss content in between.
+ *
+ * @param detectorId - Detector instance ID from createDetector()
+ * @param assetId - Video asset identifier from MediaLibrary
+ * @param confidenceThreshold - Minimum confidence threshold (default: 0.6)
+ * @returns Video analysis result
+ */
+export async function quickCheckVideo(
+  detectorId: string,
+  assetId: string,
+  confidenceThreshold: number = 0.6
+): Promise<VideoAnalysisResult> {
+  return VisionML.quickCheckVideo(detectorId, assetId, confidenceThreshold);
+}
+
 // MARK: - Vision Framework Types
 
 export interface BoundingBox {
@@ -246,6 +430,15 @@ export default {
   detect,
   disposeDetector,
   disposeAllDetectors,
+  // Live Activity
+  isLiveActivityAvailable,
+  startVideoScanActivity,
+  updateVideoScanActivity,
+  endVideoScanActivity,
+  // Video Analysis
+  analyzeVideo,
+  quickCheckVideo,
+  // Vision Framework
   analyzeAnimals,
   analyzeHumanPose,
   analyzeComprehensive

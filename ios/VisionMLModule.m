@@ -23,6 +23,45 @@ RCT_EXTERN_METHOD(disposeDetector:(NSString *)detectorId
 RCT_EXTERN_METHOD(disposeAllDetectors:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+// Live Activity Methods
+RCT_EXTERN_METHOD(isLiveActivityAvailable:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(startVideoScanActivity:(NSString *)videoName
+                  videoDuration:(NSNumber *)videoDuration
+                  scanMode:(NSString *)scanMode
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(updateVideoScanActivity:(NSNumber *)progress
+                  phase:(NSString *)phase
+                  nsfwCount:(NSNumber *)nsfwCount
+                  framesAnalyzed:(NSNumber *)framesAnalyzed
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(endVideoScanActivity:(NSNumber *)nsfwCount
+                  framesAnalyzed:(NSNumber *)framesAnalyzed
+                  isNSFW:(BOOL)isNSFW
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+// Video Analysis Methods
+RCT_EXTERN_METHOD(analyzeVideo:(NSString *)detectorId
+                  assetId:(NSString *)assetId
+                  mode:(NSString *)mode
+                  sampleInterval:(NSNumber *)sampleInterval
+                  confidenceThreshold:(NSNumber *)confidenceThreshold
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(quickCheckVideo:(NSString *)detectorId
+                  assetId:(NSString *)assetId
+                  confidenceThreshold:(NSNumber *)confidenceThreshold
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+// Vision Framework Methods
 RCT_EXTERN_METHOD(analyzeAnimals:(NSString *)assetId
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)

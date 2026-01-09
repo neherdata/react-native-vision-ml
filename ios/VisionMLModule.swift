@@ -157,6 +157,190 @@ class VisionMLModule: NSObject {
     }
   }
 
+  // MARK: - Live Activity Methods
+
+  /// Check if Live Activities are available on this device
+  @objc(isLiveActivityAvailable:reject:)
+  func isLiveActivityAvailable(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    if #available(iOS 16.1, *) {
+      resolve(VideoScanActivityManager.isAvailable)
+    } else {
+      resolve(false)
+    }
+  }
+
+  /// Start a Live Activity for video scanning
+  @objc(startVideoScanActivity:videoDuration:scanMode:resolve:reject:)
+  func startVideoScanActivity(
+    _ videoName: String,
+    videoDuration: NSNumber,
+    scanMode: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    if #available(iOS 16.1, *) {
+      if let activityId = VideoScanActivityManager.shared.startActivity(
+        videoName: videoName,
+        videoDuration: videoDuration.doubleValue,
+        scanMode: scanMode
+      ) {
+        resolve(["activityId": activityId, "success": true])
+      } else {
+        resolve(["activityId": NSNull(), "success": false])
+      }
+    } else {
+      resolve(["activityId": NSNull(), "success": false])
+    }
+  }
+
+  /// Update Live Activity progress
+  @objc(updateVideoScanActivity:phase:nsfwCount:framesAnalyzed:resolve:reject:)
+  func updateVideoScanActivity(
+    _ progress: NSNumber,
+    phase: String,
+    nsfwCount: NSNumber,
+    framesAnalyzed: NSNumber,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    if #available(iOS 16.1, *) {
+      VideoScanActivityManager.shared.updateProgress(
+        progress: progress.floatValue,
+        phase: phase,
+        nsfwCount: nsfwCount.intValue,
+        framesAnalyzed: framesAnalyzed.intValue
+      )
+      resolve(true)
+    } else {
+      resolve(false)
+    }
+  }
+
+  /// End Live Activity with results
+  @objc(endVideoScanActivity:framesAnalyzed:isNSFW:resolve:reject:)
+  func endVideoScanActivity(
+    _ nsfwCount: NSNumber,
+    framesAnalyzed: NSNumber,
+    isNSFW: Bool,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    if #available(iOS 16.1, *) {
+      VideoScanActivityManager.shared.completeActivity(
+        nsfwCount: nsfwCount.intValue,
+        framesAnalyzed: framesAnalyzed.intValue,
+        isNSFW: isNSFW
+      )
+      resolve(true)
+    } else {
+      resolve(false)
+    }
+  }
+
+  // MARK: - Video Analysis Methods
+
+  /// Analyze a video for NSFW content
+  /// - Parameters:
+  ///   - detectorId: ID of the detector to use
+  ///   - assetId: PHAsset local identifier
+  ///   - mode: Scan mode (full_short_circuit, sampled, binary_search, quick_check)
+  ///   - sampleInterval: Seconds between samples (for sampled mode)
+  ///   - confidenceThreshold: Minimum confidence threshold
+  @objc(analyzeVideo:assetId:mode:sampleInterval:confidenceThreshold:resolve:reject:)
+  func analyzeVideo(
+    _ detectorId: String,
+    assetId: String,
+    mode: String,
+    sampleInterval: NSNumber,
+    confidenceThreshold: NSNumber,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      // Get detector instance
+      let detector = self.detectorsQueue.sync {
+        return self.detectors[detectorId]
+      }
+
+      guard let inference = detector else {
+        DispatchQueue.main.async {
+          reject("DETECTOR_NOT_FOUND", "Detector with ID '\(detectorId)' not found", nil)
+        }
+        return
+      }
+
+      // Parse scan mode
+      let scanMode: VideoScanMode
+      switch mode {
+      case "quick_check":
+        scanMode = .quickCheck
+      case "sampled":
+        scanMode = .sampled
+      case "thorough":
+        scanMode = .thorough
+      case "binary_search":
+        scanMode = .binarySearch
+      case "full_short_circuit":
+        scanMode = .fullWithShortCircuit
+      default:
+        scanMode = .sampled
+      }
+
+      let analyzer = VideoAnalyzer(detector: inference, inputSize: 640)
+
+      do {
+        let result = try analyzer.analyzeVideo(
+          assetId: assetId,
+          mode: scanMode,
+          sampleInterval: sampleInterval.doubleValue > 0 ? sampleInterval.doubleValue : nil,
+          confidenceThreshold: confidenceThreshold.floatValue
+        )
+
+        DispatchQueue.main.async {
+          resolve([
+            "isNSFW": result.isNSFW,
+            "nsfwFrameCount": result.nsfwFrameCount,
+            "totalFramesAnalyzed": result.totalFramesAnalyzed,
+            "firstNSFWTimestamp": result.firstNSFWTimestamp ?? NSNull(),
+            "nsfwTimestamps": result.nsfwTimestamps,
+            "highestConfidence": result.highestConfidence,
+            "totalProcessingTime": result.totalProcessingTime,
+            "videoDuration": result.videoDuration,
+            "scanMode": result.scanMode,
+            "humanFramesDetected": result.humanFramesDetected
+          ])
+        }
+      } catch {
+        DispatchQueue.main.async {
+          reject("VIDEO_ANALYSIS_ERROR", "Video analysis failed: \(error.localizedDescription)", error)
+        }
+      }
+    }
+  }
+
+  /// Quick check a video (start, middle, end only)
+  @objc(quickCheckVideo:assetId:confidenceThreshold:resolve:reject:)
+  func quickCheckVideo(
+    _ detectorId: String,
+    assetId: String,
+    confidenceThreshold: NSNumber,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    analyzeVideo(
+      detectorId,
+      assetId: assetId,
+      mode: "quick_check",
+      sampleInterval: 0,
+      confidenceThreshold: confidenceThreshold,
+      resolve: resolve,
+      reject: reject
+    )
+  }
+
   // MARK: - Vision Framework Methods
 
   @objc(analyzeAnimals:resolve:reject:)
