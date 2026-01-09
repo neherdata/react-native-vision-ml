@@ -1050,16 +1050,10 @@ class VisionMLModule: NSObject {
 
         Task {
           do {
-            var isSensitive = false
             let analysisHandler = analyzer.videoAnalysis(forFileAt: videoURL)
 
-            // Process the async stream of results
-            for try await result in analysisHandler.results {
-              if result.isSensitive {
-                isSensitive = true
-                break // Short-circuit on first sensitive detection
-              }
-            }
+            // Use hasSensitiveContent() which returns Bool
+            let isSensitive = try await analysisHandler.hasSensitiveContent()
 
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
 
@@ -1157,15 +1151,8 @@ class VisionMLModule: NSObject {
 
             Task {
               do {
-                var isSensitive = false
                 let analysisHandler = analyzer.videoAnalysis(forFileAt: urlAsset.url)
-
-                for try await result in analysisHandler.results {
-                  if result.isSensitive {
-                    isSensitive = true
-                    break
-                  }
-                }
+                let isSensitive = try await analysisHandler.hasSensitiveContent()
 
                 resultQueue.async {
                   results.append([
