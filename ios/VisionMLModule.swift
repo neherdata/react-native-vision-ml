@@ -844,8 +844,7 @@ class VisionMLModule: NSObject {
 
         Task {
           do {
-            let handler = analyzer.imageHandler(for: cgImage)
-            let response = try await handler.hasSensitiveContent()
+            let response = try await analyzer.analyzeImage(cgImage)
 
             DispatchQueue.main.async {
               resolve([
@@ -943,8 +942,7 @@ class VisionMLModule: NSObject {
 
             Task {
               do {
-                let handler = analyzer.imageHandler(for: cgImage)
-                let response = try await handler.hasSensitiveContent()
+                let response = try await analyzer.analyzeImage(cgImage)
 
                 resultQueue.async {
                   results.append([
