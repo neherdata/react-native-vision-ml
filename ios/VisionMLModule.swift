@@ -2,6 +2,10 @@ import Foundation
 import React
 import Vision
 import Photos
+import UIKit
+#if canImport(SensitiveContentAnalysis)
+import SensitiveContentAnalysis
+#endif
 
 @objc(VisionML)
 class VisionMLModule: NSObject {
@@ -696,6 +700,298 @@ class VisionMLModule: NSObject {
         completion(result)
       }
     }
+  }
+
+  // MARK: - Sensitive Content Analysis (iOS 17+)
+
+  /// Get the status of Sensitive Content Analysis
+  /// Returns availability, policy status, and settings URL
+  @objc(getSensitiveContentAnalysisStatus:reject:)
+  func getSensitiveContentAnalysisStatus(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    #if canImport(SensitiveContentAnalysis)
+    if #available(iOS 17.0, *) {
+      let analyzer = SCSensitivityAnalyzer()
+      let policy = analyzer.analysisPolicy
+
+      var policyString: String
+      var isEnabled: Bool
+
+      switch policy {
+      case .disabled:
+        policyString = "disabled"
+        isEnabled = false
+      case .simpleInterventions:
+        policyString = "simple_interventions"
+        isEnabled = true
+      case .descriptiveInterventions:
+        policyString = "descriptive_interventions"
+        isEnabled = true
+      @unknown default:
+        policyString = "unknown"
+        isEnabled = false
+      }
+
+      resolve([
+        "available": true,
+        "enabled": isEnabled,
+        "policy": policyString,
+        "settingsURL": "App-Prefs:SENSITIVE_CONTENT_WARNING",
+        "iosVersion": UIDevice.current.systemVersion
+      ])
+    } else {
+      resolve([
+        "available": false,
+        "enabled": false,
+        "policy": "unsupported",
+        "reason": "Requires iOS 17.0 or later",
+        "iosVersion": UIDevice.current.systemVersion
+      ])
+    }
+    #else
+    resolve([
+      "available": false,
+      "enabled": false,
+      "policy": "unsupported",
+      "reason": "SensitiveContentAnalysis framework not available",
+      "iosVersion": UIDevice.current.systemVersion
+    ])
+    #endif
+  }
+
+  /// Open iOS Settings to the Sensitive Content Warning section
+  @objc(openSensitiveContentSettings:reject:)
+  func openSensitiveContentSettings(
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    DispatchQueue.main.async {
+      // Try specific Sensitive Content Warning settings first
+      if let url = URL(string: "App-Prefs:SENSITIVE_CONTENT_WARNING") {
+        if UIApplication.shared.canOpenURL(url) {
+          UIApplication.shared.open(url, options: [:]) { success in
+            resolve(["opened": success, "url": "App-Prefs:SENSITIVE_CONTENT_WARNING"])
+          }
+          return
+        }
+      }
+
+      // Fallback to Privacy settings
+      if let url = URL(string: "App-Prefs:Privacy") {
+        if UIApplication.shared.canOpenURL(url) {
+          UIApplication.shared.open(url, options: [:]) { success in
+            resolve(["opened": success, "url": "App-Prefs:Privacy"])
+          }
+          return
+        }
+      }
+
+      // Final fallback to general Settings
+      if let url = URL(string: UIApplication.openSettingsURLString) {
+        UIApplication.shared.open(url, options: [:]) { success in
+          resolve(["opened": success, "url": "Settings"])
+        }
+      } else {
+        resolve(["opened": false, "url": nil])
+      }
+    }
+  }
+
+  /// Analyze a single image for sensitive content using Apple's SCA
+  /// Returns isSensitive boolean - much faster than ONNX but no bounding boxes
+  @objc(analyzeSensitiveContent:resolve:reject:)
+  func analyzeSensitiveContent(
+    _ assetId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    #if canImport(SensitiveContentAnalysis)
+    if #available(iOS 17.0, *) {
+      let analyzer = SCSensitivityAnalyzer()
+
+      guard analyzer.analysisPolicy != .disabled else {
+        resolve([
+          "available": false,
+          "isSensitive": false,
+          "reason": "disabled_by_user"
+        ])
+        return
+      }
+
+      // Fetch the PHAsset
+      guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject else {
+        reject("ASSET_NOT_FOUND", "Could not find asset with ID: \(assetId)", nil)
+        return
+      }
+
+      let options = PHImageRequestOptions()
+      options.deliveryMode = .highQualityFormat
+      options.isSynchronous = false
+      options.isNetworkAccessAllowed = false
+
+      PHImageManager.default().requestImage(
+        for: asset,
+        targetSize: CGSize(width: 640, height: 640),
+        contentMode: .aspectFit,
+        options: options
+      ) { image, _ in
+        guard let image = image, let cgImage = image.cgImage else {
+          reject("IMAGE_LOAD_FAILED", "Could not load image for asset", nil)
+          return
+        }
+
+        Task {
+          do {
+            let handler = analyzer.imageHandler(for: cgImage)
+            let response = try await handler.hasSensitiveContent()
+
+            DispatchQueue.main.async {
+              resolve([
+                "available": true,
+                "isSensitive": response.isSensitive,
+                "assetId": assetId
+              ])
+            }
+          } catch {
+            DispatchQueue.main.async {
+              reject("SCA_ERROR", "Sensitive content analysis failed: \(error.localizedDescription)", error)
+            }
+          }
+        }
+      }
+    } else {
+      resolve([
+        "available": false,
+        "isSensitive": false,
+        "reason": "ios_version"
+      ])
+    }
+    #else
+    resolve([
+      "available": false,
+      "isSensitive": false,
+      "reason": "framework_unavailable"
+    ])
+    #endif
+  }
+
+  /// Batch analyze multiple images for sensitive content
+  /// Returns array of results - use as pre-filter before detailed ONNX scan
+  @objc(batchAnalyzeSensitiveContent:resolve:reject:)
+  func batchAnalyzeSensitiveContent(
+    _ assetIds: [String],
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    #if canImport(SensitiveContentAnalysis)
+    if #available(iOS 17.0, *) {
+      let analyzer = SCSensitivityAnalyzer()
+
+      guard analyzer.analysisPolicy != .disabled else {
+        resolve([
+          "available": false,
+          "results": [],
+          "reason": "disabled_by_user"
+        ])
+        return
+      }
+
+      DispatchQueue.global(qos: .userInitiated).async {
+        var results: [[String: Any]] = []
+        let resultQueue = DispatchQueue(label: "com.visionml.sca.results")
+        let group = DispatchGroup()
+
+        for assetId in assetIds {
+          group.enter()
+
+          guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject else {
+            resultQueue.async {
+              results.append([
+                "assetId": assetId,
+                "isSensitive": false,
+                "error": "asset_not_found"
+              ])
+            }
+            group.leave()
+            continue
+          }
+
+          let options = PHImageRequestOptions()
+          options.deliveryMode = .fastFormat  // Use fast format for batch
+          options.isSynchronous = true
+          options.isNetworkAccessAllowed = false
+
+          PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: CGSize(width: 320, height: 320),  // Smaller size for speed
+            contentMode: .aspectFit,
+            options: options
+          ) { image, _ in
+            guard let image = image, let cgImage = image.cgImage else {
+              resultQueue.async {
+                results.append([
+                  "assetId": assetId,
+                  "isSensitive": false,
+                  "error": "image_load_failed"
+                ])
+              }
+              group.leave()
+              return
+            }
+
+            Task {
+              do {
+                let handler = analyzer.imageHandler(for: cgImage)
+                let response = try await handler.hasSensitiveContent()
+
+                resultQueue.async {
+                  results.append([
+                    "assetId": assetId,
+                    "isSensitive": response.isSensitive
+                  ])
+                }
+              } catch {
+                resultQueue.async {
+                  results.append([
+                    "assetId": assetId,
+                    "isSensitive": false,
+                    "error": error.localizedDescription
+                  ])
+                }
+              }
+              group.leave()
+            }
+          }
+        }
+
+        group.notify(queue: .main) {
+          resultQueue.sync {
+            let sensitiveCount = results.filter { ($0["isSensitive"] as? Bool) == true }.count
+            resolve([
+              "available": true,
+              "results": results,
+              "totalAnalyzed": results.count,
+              "sensitiveCount": sensitiveCount
+            ])
+          }
+        }
+      }
+    } else {
+      resolve([
+        "available": false,
+        "results": [],
+        "reason": "ios_version"
+      ])
+    }
+    #else
+    resolve([
+      "available": false,
+      "results": [],
+      "reason": "framework_unavailable"
+    ])
+    #endif
   }
 
   @objc

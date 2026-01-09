@@ -425,6 +425,143 @@ export async function analyzeComprehensive(assetId: string): Promise<Comprehensi
   return VisionML.analyzeComprehensive(assetId);
 }
 
+// MARK: - Sensitive Content Analysis Types (iOS 17+)
+
+/**
+ * Status of Apple's Sensitive Content Analysis feature
+ */
+export interface SensitiveContentAnalysisStatus {
+  /** Whether SCA is available on this iOS version */
+  available: boolean;
+  /** Whether the user has enabled Sensitive Content Warning in Settings */
+  enabled: boolean;
+  /** Policy level: 'disabled', 'simple_interventions', 'descriptive_interventions', 'unsupported' */
+  policy: 'disabled' | 'simple_interventions' | 'descriptive_interventions' | 'unsupported' | 'unknown';
+  /** URL scheme to open Settings (may not work on all iOS versions) */
+  settingsURL?: string;
+  /** iOS version string */
+  iosVersion: string;
+  /** Reason if not available */
+  reason?: string;
+}
+
+/**
+ * Result from opening Settings
+ */
+export interface OpenSettingsResult {
+  /** Whether Settings was opened */
+  opened: boolean;
+  /** Which URL was used */
+  url: string | null;
+}
+
+/**
+ * Result from single image sensitive content analysis
+ */
+export interface SensitiveContentResult {
+  /** Whether SCA was available to use */
+  available: boolean;
+  /** Whether the image contains sensitive content */
+  isSensitive: boolean;
+  /** Asset ID that was analyzed */
+  assetId?: string;
+  /** Reason if not available: 'disabled_by_user', 'ios_version', 'framework_unavailable' */
+  reason?: 'disabled_by_user' | 'ios_version' | 'framework_unavailable';
+}
+
+/**
+ * Single result in batch analysis
+ */
+export interface BatchSensitiveContentItem {
+  /** Asset ID */
+  assetId: string;
+  /** Whether sensitive content was detected */
+  isSensitive: boolean;
+  /** Error message if analysis failed */
+  error?: string;
+}
+
+/**
+ * Result from batch sensitive content analysis
+ */
+export interface BatchSensitiveContentResult {
+  /** Whether SCA was available to use */
+  available: boolean;
+  /** Array of results for each asset */
+  results: BatchSensitiveContentItem[];
+  /** Total number of assets analyzed */
+  totalAnalyzed?: number;
+  /** Number of sensitive items found */
+  sensitiveCount?: number;
+  /** Reason if not available */
+  reason?: 'disabled_by_user' | 'ios_version' | 'framework_unavailable';
+}
+
+/**
+ * Get the status of Apple's Sensitive Content Analysis feature
+ *
+ * Returns whether SCA is available and enabled. The user must enable
+ * "Sensitive Content Warning" in iOS Settings > Privacy & Security > Sensitive Content Warning
+ *
+ * @returns Status object with availability, policy, and settings URL
+ */
+export async function getSensitiveContentAnalysisStatus(): Promise<SensitiveContentAnalysisStatus> {
+  return VisionML.getSensitiveContentAnalysisStatus();
+}
+
+/**
+ * Open iOS Settings to the Sensitive Content Warning section
+ *
+ * Attempts to deep link directly to the Sensitive Content Warning toggle.
+ * Falls back to Privacy settings, then general Settings.
+ *
+ * @returns Whether Settings was opened and which URL was used
+ */
+export async function openSensitiveContentSettings(): Promise<OpenSettingsResult> {
+  return VisionML.openSensitiveContentSettings();
+}
+
+/**
+ * Analyze a single image for sensitive content using Apple's SCA
+ *
+ * This is MUCH faster than ONNX (~20ms vs ~150ms) but only returns
+ * a boolean result - no bounding boxes or confidence scores.
+ *
+ * Perfect for pre-filtering: if SCA says "not sensitive", skip ONNX.
+ * If SCA says "sensitive", run ONNX for detailed detection.
+ *
+ * Requires iOS 17+ and user to enable Sensitive Content Warning in Settings.
+ *
+ * @param assetId - Photo asset identifier from MediaLibrary
+ * @returns Analysis result with isSensitive boolean
+ */
+export async function analyzeSensitiveContent(assetId: string): Promise<SensitiveContentResult> {
+  return VisionML.analyzeSensitiveContent(assetId);
+}
+
+/**
+ * Batch analyze multiple images for sensitive content
+ *
+ * Uses Apple's SCA for fast pre-filtering. Process results to identify
+ * which photos need detailed ONNX scanning.
+ *
+ * Typical workflow:
+ * 1. Get all photo IDs from library
+ * 2. Run batchAnalyzeSensitiveContent() - very fast
+ * 3. Filter to only sensitiveCount photos
+ * 4. Run ONNX only on those for bounding boxes
+ *
+ * This can skip 60-80% of photos that are clearly clean.
+ *
+ * @param assetIds - Array of photo asset identifiers
+ * @returns Batch results with per-photo analysis
+ */
+export async function batchAnalyzeSensitiveContent(
+  assetIds: string[]
+): Promise<BatchSensitiveContentResult> {
+  return VisionML.batchAnalyzeSensitiveContent(assetIds);
+}
+
 export default {
   createDetector,
   detect,
@@ -441,5 +578,10 @@ export default {
   // Vision Framework
   analyzeAnimals,
   analyzeHumanPose,
-  analyzeComprehensive
+  analyzeComprehensive,
+  // Sensitive Content Analysis (iOS 17+)
+  getSensitiveContentAnalysisStatus,
+  openSensitiveContentSettings,
+  analyzeSensitiveContent,
+  batchAnalyzeSensitiveContent
 };

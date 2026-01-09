@@ -31,6 +31,7 @@ All major components have been implemented. Ready for integration testing.
 | PHAsset | MediaStore/ContentResolver | ✅ |
 | Live Activity | Foreground Service (stub) | 🔶 Stub |
 | CoreML acceleration | NNAPI delegate | ✅ |
+| SensitiveContentAnalysis | N/A (iOS 17+ only) | ❌ iOS-only |
 
 ## Architecture
 
