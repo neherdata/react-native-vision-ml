@@ -1,0 +1,68 @@
+buildscript {
+    ext.kotlin_version = '1.9.10'
+
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.1.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace 'com.visionml'
+    compileSdkVersion 34
+
+    defaultConfig {
+        minSdkVersion 24
+        targetSdkVersion 34
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs = ['src/main/java']
+        }
+    }
+}
+
+repositories {
+    google()
+    mavenCentral()
+}
+
+dependencies {
+    // React Native
+    implementation 'com.facebook.react:react-native:+'
+
+    // Kotlin
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+
+    // ONNX Runtime for Android (TODO: uncomment when implementing)
+    // implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.16.0'
+
+    // ML Kit (TODO: uncomment when implementing)
+    // implementation 'com.google.mlkit:pose-detection:18.0.0-beta4'
+    // implementation 'com.google.mlkit:face-detection:16.1.6'
+    // implementation 'com.google.mlkit:image-labeling:17.0.8'
+}
