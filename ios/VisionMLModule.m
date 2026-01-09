@@ -89,6 +89,15 @@ RCT_EXTERN_METHOD(batchAnalyzeSensitiveContent:(NSArray *)assetIds
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
+// SCA Video Analysis Methods (iOS 17+)
+RCT_EXTERN_METHOD(analyzeVideoSensitiveContent:(NSString *)assetId
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(batchAnalyzeVideosSensitiveContent:(NSArray *)assetIds
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
 + (BOOL)requiresMainQueueSetup {
   return NO;
 }

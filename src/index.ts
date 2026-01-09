@@ -562,6 +562,97 @@ export async function batchAnalyzeSensitiveContent(
   return VisionML.batchAnalyzeSensitiveContent(assetIds);
 }
 
+// MARK: - SCA Video Analysis Types (iOS 17+)
+
+/**
+ * Result from single video sensitive content analysis
+ */
+export interface VideoSensitiveContentResult {
+  /** Whether SCA was available to use */
+  available: boolean;
+  /** Whether the video contains sensitive content */
+  isSensitive: boolean;
+  /** Asset ID that was analyzed */
+  assetId?: string;
+  /** Analysis time in milliseconds */
+  analysisTime?: number;
+  /** Video duration in seconds */
+  videoDuration?: number;
+  /** Reason if not available: 'disabled_by_user', 'ios_version', 'framework_unavailable' */
+  reason?: 'disabled_by_user' | 'ios_version' | 'framework_unavailable';
+}
+
+/**
+ * Single result in batch video analysis
+ */
+export interface BatchVideoSensitiveContentItem {
+  /** Asset ID */
+  assetId: string;
+  /** Whether sensitive content was detected */
+  isSensitive: boolean;
+  /** Video duration in seconds */
+  duration?: number;
+  /** Error message if analysis failed */
+  error?: string;
+}
+
+/**
+ * Result from batch video sensitive content analysis
+ */
+export interface BatchVideoSensitiveContentResult {
+  /** Whether SCA was available to use */
+  available: boolean;
+  /** Array of results for each video */
+  results: BatchVideoSensitiveContentItem[];
+  /** Total number of videos analyzed */
+  totalAnalyzed?: number;
+  /** Number of sensitive videos found */
+  sensitiveCount?: number;
+  /** Reason if not available */
+  reason?: 'disabled_by_user' | 'ios_version' | 'framework_unavailable';
+}
+
+/**
+ * Analyze a video for sensitive content using Apple's SCA
+ *
+ * Much faster than ONNX frame-by-frame analysis. Uses Apple's native
+ * video analysis which streams through the video efficiently.
+ * Returns a simple boolean - perfect for filtering videos.
+ *
+ * Short-circuits on first sensitive detection for speed.
+ *
+ * Requires iOS 17+ and user to enable Sensitive Content Warning in Settings.
+ *
+ * @param assetId - Video asset identifier from MediaLibrary
+ * @returns Analysis result with isSensitive boolean
+ */
+export async function analyzeVideoSensitiveContent(
+  assetId: string
+): Promise<VideoSensitiveContentResult> {
+  return VisionML.analyzeVideoSensitiveContent(assetId);
+}
+
+/**
+ * Batch analyze multiple videos for sensitive content using SCA
+ *
+ * Uses Apple's SCA for fast video pre-filtering. Much more efficient
+ * than ONNX frame sampling for initial screening.
+ *
+ * Typical workflow:
+ * 1. Get all video IDs from library
+ * 2. Run batchAnalyzeVideosSensitiveContent() - fast native analysis
+ * 3. Filter to only sensitiveCount videos
+ * 4. Optionally run ONNX on those for frame timestamps
+ *
+ * @param assetIds - Array of video asset identifiers
+ * @returns Batch results with per-video analysis
+ */
+export async function batchAnalyzeVideosSensitiveContent(
+  assetIds: string[]
+): Promise<BatchVideoSensitiveContentResult> {
+  return VisionML.batchAnalyzeVideosSensitiveContent(assetIds);
+}
+
 export default {
   createDetector,
   detect,
@@ -583,5 +674,8 @@ export default {
   getSensitiveContentAnalysisStatus,
   openSensitiveContentSettings,
   analyzeSensitiveContent,
-  batchAnalyzeSensitiveContent
+  batchAnalyzeSensitiveContent,
+  // SCA Video Analysis (iOS 17+)
+  analyzeVideoSensitiveContent,
+  batchAnalyzeVideosSensitiveContent
 };

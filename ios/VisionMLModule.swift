@@ -718,28 +718,37 @@ class VisionMLModule: NSObject {
 
       var policyString: String
       var isEnabled: Bool
+      var policyRawValue: Int = -1
 
       switch policy {
       case .disabled:
         policyString = "disabled"
         isEnabled = false
+        policyRawValue = 0
       case .simpleInterventions:
         policyString = "simple_interventions"
         isEnabled = true
+        policyRawValue = 1
       case .descriptiveInterventions:
         policyString = "descriptive_interventions"
         isEnabled = true
+        policyRawValue = 2
       @unknown default:
         policyString = "unknown"
         isEnabled = false
+        policyRawValue = 99
       }
+
+      // Debug: Log the raw policy value
+      print("[VisionML] SCA Policy check - raw: \(policy), string: \(policyString), enabled: \(isEnabled)")
 
       resolve([
         "available": true,
         "enabled": isEnabled,
         "policy": policyString,
-        "settingsURL": "App-Prefs:SENSITIVE_CONTENT_WARNING",
-        "iosVersion": UIDevice.current.systemVersion
+        "policyRawValue": policyRawValue,
+        "iosVersion": UIDevice.current.systemVersion,
+        "hint": isEnabled ? "SCA is ready to use" : "Enable at least one option under Sensitive Content Warning in iOS Settings"
       ])
     } else {
       resolve([
@@ -761,42 +770,30 @@ class VisionMLModule: NSObject {
     #endif
   }
 
-  /// Open iOS Settings to the Sensitive Content Warning section
+  /// Open iOS Settings - no reliable deep link to SCA exists
   @objc(openSensitiveContentSettings:reject:)
   func openSensitiveContentSettings(
     resolve: @escaping RCTPromiseResolveBlock,
     reject: @escaping RCTPromiseRejectBlock
   ) {
     DispatchQueue.main.async {
-      // Try Privacy & Security deep link first (works on iOS 15+)
-      let privacyUrls = [
-        "App-Prefs:Privacy&path=SENSITIVE_CONTENT_WARNING",  // Specific SCA path
-        "App-Prefs:Privacy",                                  // Privacy & Security
-        "prefs:root=Privacy",                                 // Alternative format
-      ]
-
-      for urlString in privacyUrls {
-        if let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
-          UIApplication.shared.open(url, options: [:]) { success in
-            if success {
-              resolve([
-                "opened": true,
-                "url": urlString,
-                "instructions": "Scroll down and tap 'Sensitive Content Warning' to enable it"
-              ])
-            }
-          }
-          return
+      // Apple doesn't provide a public deep link to Privacy & Security or SCA
+      // App-Prefs: URLs are private APIs that break frequently
+      // Just open the main Settings app and provide clear instructions
+      if let url = URL(string: "App-Prefs:root=Privacy") {
+        UIApplication.shared.open(url, options: [:]) { success in
+          resolve([
+            "opened": success,
+            "url": "Privacy",
+            "instructions": "Scroll down to 'Sensitive Content Warning' and turn it ON"
+          ])
         }
-      }
-
-      // Fallback to app settings
-      if let url = URL(string: UIApplication.openSettingsURLString) {
+      } else if let url = URL(string: UIApplication.openSettingsURLString) {
         UIApplication.shared.open(url, options: [:]) { success in
           resolve([
             "opened": success,
             "url": "Settings",
-            "instructions": "Go to: Privacy & Security → Sensitive Content Warning"
+            "instructions": "Go to: Privacy & Security → Sensitive Content Warning (scroll down)"
           ])
         }
       } else {
@@ -958,6 +955,223 @@ class VisionMLModule: NSObject {
                   results.append([
                     "assetId": assetId,
                     "isSensitive": response.isSensitive
+                  ])
+                }
+              } catch {
+                resultQueue.async {
+                  results.append([
+                    "assetId": assetId,
+                    "isSensitive": false,
+                    "error": error.localizedDescription
+                  ])
+                }
+              }
+              group.leave()
+            }
+          }
+        }
+
+        group.notify(queue: .main) {
+          resultQueue.sync {
+            let sensitiveCount = results.filter { ($0["isSensitive"] as? Bool) == true }.count
+            resolve([
+              "available": true,
+              "results": results,
+              "totalAnalyzed": results.count,
+              "sensitiveCount": sensitiveCount
+            ])
+          }
+        }
+      }
+    } else {
+      resolve([
+        "available": false,
+        "results": [],
+        "reason": "ios_version"
+      ])
+    }
+    #else
+    resolve([
+      "available": false,
+      "results": [],
+      "reason": "framework_unavailable"
+    ])
+    #endif
+  }
+
+  /// Analyze a video for sensitive content using Apple's SCA
+  /// Much faster than ONNX frame-by-frame analysis, returns boolean result
+  @objc(analyzeVideoSensitiveContent:resolve:reject:)
+  func analyzeVideoSensitiveContent(
+    _ assetId: String,
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    #if canImport(SensitiveContentAnalysis)
+    if #available(iOS 17.0, *) {
+      let analyzer = SCSensitivityAnalyzer()
+
+      guard analyzer.analysisPolicy != .disabled else {
+        resolve([
+          "available": false,
+          "isSensitive": false,
+          "reason": "disabled_by_user"
+        ])
+        return
+      }
+
+      // Fetch the video asset
+      guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject else {
+        reject("ASSET_NOT_FOUND", "Could not find video asset with ID: \(assetId)", nil)
+        return
+      }
+
+      guard asset.mediaType == .video else {
+        reject("NOT_VIDEO", "Asset is not a video", nil)
+        return
+      }
+
+      // Request the video file URL
+      let options = PHVideoRequestOptions()
+      options.version = .current
+      options.deliveryMode = .fastFormat
+      options.isNetworkAccessAllowed = false
+
+      PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+        guard let urlAsset = avAsset as? AVURLAsset else {
+          DispatchQueue.main.async {
+            reject("VIDEO_LOAD_FAILED", "Could not load video file", nil)
+          }
+          return
+        }
+
+        let videoURL = urlAsset.url
+        let startTime = CFAbsoluteTimeGetCurrent()
+
+        Task {
+          do {
+            var isSensitive = false
+            let analysisHandler = analyzer.videoAnalysis(forFileAt: videoURL)
+
+            // Process the async stream of results
+            for try await result in analysisHandler.results {
+              if result.isSensitive {
+                isSensitive = true
+                break // Short-circuit on first sensitive detection
+              }
+            }
+
+            let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+
+            DispatchQueue.main.async {
+              resolve([
+                "available": true,
+                "isSensitive": isSensitive,
+                "assetId": assetId,
+                "analysisTime": elapsed * 1000, // Convert to milliseconds
+                "videoDuration": asset.duration
+              ])
+            }
+          } catch {
+            DispatchQueue.main.async {
+              reject("SCA_VIDEO_ERROR", "Video analysis failed: \(error.localizedDescription)", error)
+            }
+          }
+        }
+      }
+    } else {
+      resolve([
+        "available": false,
+        "isSensitive": false,
+        "reason": "ios_version"
+      ])
+    }
+    #else
+    resolve([
+      "available": false,
+      "isSensitive": false,
+      "reason": "framework_unavailable"
+    ])
+    #endif
+  }
+
+  /// Batch analyze multiple videos for sensitive content using SCA
+  /// Returns array of results with boolean isSensitive for each
+  @objc(batchAnalyzeVideosSensitiveContent:resolve:reject:)
+  func batchAnalyzeVideosSensitiveContent(
+    _ assetIds: [String],
+    resolve: @escaping RCTPromiseResolveBlock,
+    reject: @escaping RCTPromiseRejectBlock
+  ) {
+    #if canImport(SensitiveContentAnalysis)
+    if #available(iOS 17.0, *) {
+      let analyzer = SCSensitivityAnalyzer()
+
+      guard analyzer.analysisPolicy != .disabled else {
+        resolve([
+          "available": false,
+          "results": [],
+          "reason": "disabled_by_user"
+        ])
+        return
+      }
+
+      DispatchQueue.global(qos: .userInitiated).async {
+        var results: [[String: Any]] = []
+        let resultQueue = DispatchQueue(label: "com.visionml.sca.videoresults")
+        let group = DispatchGroup()
+
+        for assetId in assetIds {
+          group.enter()
+
+          guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject,
+                asset.mediaType == .video else {
+            resultQueue.async {
+              results.append([
+                "assetId": assetId,
+                "isSensitive": false,
+                "error": "asset_not_found_or_not_video"
+              ])
+            }
+            group.leave()
+            continue
+          }
+
+          let options = PHVideoRequestOptions()
+          options.version = .current
+          options.deliveryMode = .fastFormat
+          options.isNetworkAccessAllowed = false
+
+          PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
+            guard let urlAsset = avAsset as? AVURLAsset else {
+              resultQueue.async {
+                results.append([
+                  "assetId": assetId,
+                  "isSensitive": false,
+                  "error": "video_load_failed"
+                ])
+              }
+              group.leave()
+              return
+            }
+
+            Task {
+              do {
+                var isSensitive = false
+                let analysisHandler = analyzer.videoAnalysis(forFileAt: urlAsset.url)
+
+                for try await result in analysisHandler.results {
+                  if result.isSensitive {
+                    isSensitive = true
+                    break
+                  }
+                }
+
+                resultQueue.async {
+                  results.append([
+                    "assetId": assetId,
+                    "isSensitive": isSensitive,
+                    "duration": asset.duration
                   ])
                 }
               } catch {
