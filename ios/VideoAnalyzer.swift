@@ -435,13 +435,8 @@ class VideoAnalyzer {
 
     defer { try? FileManager.default.removeItem(at: tempURL) }
 
-    // Use UTType for iOS 14+
-    let jpegType: CFString
-    if #available(iOS 14.0, *) {
-      jpegType = UTType.jpeg.identifier as CFString
-    } else {
-      jpegType = kUTTypeJPEG
-    }
+    // UTType requires iOS 14+ which is our minimum deployment target
+    let jpegType = UTType.jpeg.identifier as CFString
 
     guard let destination = CGImageDestinationCreateWithURL(tempURL as CFURL, jpegType, 1, nil) else {
       throw VideoAnalyzerError.frameExtractionFailed
