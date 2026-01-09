@@ -1,254 +1,134 @@
-# Android Implementation Plan for react-native-vision-ml
+# Android Implementation for react-native-vision-ml
 
-## Overview
+## Status: ✅ Core Implementation Complete
 
-This document outlines the plan to add Android support to the react-native-vision-ml native module. The iOS implementation provides on-device ONNX inference with Vision framework integration for human/pose/face detection and video analysis.
+All major components have been implemented. Ready for integration testing.
 
-## Feature Mapping: iOS → Android
+## Implementation Summary
 
-| iOS Feature | Android Equivalent | Status |
-|-------------|-------------------|--------|
-| ONNX Runtime (Swift/ObjC) | ONNX Runtime Android (Kotlin) | 📋 Planned |
-| Vision Framework | Google ML Kit | 📋 Planned |
-| AVFoundation (video) | MediaExtractor + ImageReader | 📋 Planned |
-| PHAsset | MediaStore/ContentResolver | 📋 Planned |
-| Live Activity | Foreground Service + Notification | 📋 Planned |
-| CoreML acceleration | NNAPI delegate | 📋 Planned |
+### ✅ Completed Components
 
-## Implementation Phases
+| Component | File | Status |
+|-----------|------|--------|
+| NMS (Non-Maximum Suppression) | `NMS.kt` | ✅ Complete |
+| YOLO Parser | `YOLOParser.kt` | ✅ Complete |
+| Image Decoder | `ImageDecoder.kt` | ✅ Complete |
+| ONNX Inference | `ONNXInference.kt` | ✅ Complete |
+| Video Analyzer | `VideoAnalyzer.kt` | ✅ Complete |
+| ML Kit Analyzer | `MLKitAnalyzer.kt` | ✅ Complete |
+| RN Bridge Module | `VisionMLModule.kt` | ✅ Complete |
+| Package Registration | `VisionMLPackage.kt` | ✅ Complete |
+| Build Configuration | `build.gradle` | ✅ Complete |
+| Manifest | `AndroidManifest.xml` | ✅ Complete |
 
-### Phase 1: Core ONNX Inference ⏱️ ~2-3 days
+### Feature Mapping: iOS → Android
 
-**Files to create:**
-- `android/src/main/java/com/visionml/ONNXInference.kt`
-- `android/src/main/java/com/visionml/ImageDecoder.kt`
-- `android/src/main/java/com/visionml/YOLOParser.kt`
-- `android/src/main/java/com/visionml/NMS.kt`
+| iOS Feature | Android Implementation | Status |
+|-------------|----------------------|--------|
+| ONNX Runtime (Swift/ObjC) | ONNX Runtime Android (Kotlin) | ✅ |
+| Vision Framework | Google ML Kit | ✅ |
+| AVFoundation (video) | MediaMetadataRetriever | ✅ |
+| PHAsset | MediaStore/ContentResolver | ✅ |
+| Live Activity | Foreground Service (stub) | 🔶 Stub |
+| CoreML acceleration | NNAPI delegate | ✅ |
 
-**Dependencies:**
-```gradle
-implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.16.0'
+## Architecture
+
+```
+VisionMLModule.kt (React Native Bridge)
+    ├── ONNXInference.kt
+    │   ├── ImageDecoder.kt (letterbox resize, EXIF handling)
+    │   ├── YOLOParser.kt (output parsing)
+    │   └── NMS.kt (non-maximum suppression)
+    │
+    ├── VideoAnalyzer.kt
+    │   ├── ScanMode: quick_check, sampled, thorough, binary_search, full_short_circuit
+    │   └── MediaMetadataRetriever for frame extraction
+    │
+    └── MLKitAnalyzer.kt
+        ├── Face Detection
+        ├── Pose Detection
+        ├── Image Labeling (animal detection)
+        └── Text Recognition
 ```
 
-**Key implementation notes:**
-1. ONNX Runtime Android has nearly identical API to iOS:
-   - `OrtEnvironment` → iOS `ONNXWrapper`
-   - `OrtSession` → Same concept
-   - Input/output tensors work the same way
+## API Parity with iOS
 
-2. Image preprocessing (letterbox resize, NCHW conversion) is identical logic
+All iOS methods are implemented:
 
-3. YOLO output parsing and NMS are pure math - can port directly
+```kotlin
+// Detector Management
+createDetector(modelPath, classLabels, inputSize) → detectorId
+detect(detectorId, imageUri, confThreshold, iouThreshold) → detections
+disposeDetector(detectorId)
+disposeAllDetectors()
 
-### Phase 2: ML Kit Integration ⏱️ ~2 days
+// Video Analysis
+analyzeVideo(detectorId, assetId, mode, sampleInterval, confThreshold)
+quickCheckVideo(detectorId, assetId, confThreshold)
 
-**Files to create:**
-- `android/src/main/java/com/visionml/VisionAnalyzer.kt`
+// ML Kit (Vision Framework equivalent)
+analyzeAnimals(assetId)
+analyzeHumanPose(assetId)
+analyzeComprehensive(assetId)
 
-**Dependencies:**
+// Progress Notification (Live Activity equivalent)
+isLiveActivityAvailable() → true (always available on Android)
+startVideoScanActivity(videoName, duration, mode)
+updateVideoScanActivity(progress, phase, nsfwCount, framesAnalyzed)
+endVideoScanActivity(nsfwCount, framesAnalyzed, isNSFW)
+```
+
+## Dependencies
+
 ```gradle
+// ONNX Runtime
+implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.16.0'
+
+// ML Kit
 implementation 'com.google.mlkit:pose-detection:18.0.0-beta4'
 implementation 'com.google.mlkit:face-detection:16.1.6'
 implementation 'com.google.mlkit:image-labeling:17.0.8'
+implementation 'com.google.mlkit:text-recognition:16.0.0'
+
+// Kotlin Coroutines
+implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
+implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 ```
 
-**ML Kit equivalents:**
-| iOS Vision Request | ML Kit API |
-|-------------------|------------|
-| `VNDetectHumanBodyPoseRequest` | `PoseDetector` |
-| `VNDetectFaceRectanglesRequest` | `FaceDetector` |
-| `VNRecognizeAnimalsRequest` | `ImageLabeler` (animals subset) |
-| `VNClassifyImageRequest` | `ImageLabeler` |
-| `VNDetectHumanRectanglesRequest` | `PoseDetector` (check if any poses) |
-| `VNRecognizeTextRequest` | `TextRecognizer` |
+## Key Differences from iOS
 
-### Phase 3: Video Analysis ⏱️ ~3-4 days
+1. **Y-axis orientation**: Android Bitmap has origin at top-left (same as standard image coordinates), so no Y-flip needed in YOLOParser (unlike iOS CGContext which has origin at bottom-left)
 
-**Files to create:**
-- `android/src/main/java/com/visionml/VideoAnalyzer.kt`
-- `android/src/main/java/com/visionml/VideoFrameExtractor.kt`
+2. **EXIF handling**: Android requires explicit ExifInterface for rotation, handled in ImageDecoder
 
-**Implementation approach:**
+3. **Video frame extraction**: Uses `MediaMetadataRetriever.getFrameAtTime()` instead of `AVAssetImageGenerator`
 
-```kotlin
-class VideoFrameExtractor(private val context: Context) {
+4. **ML Kit vs Vision**: Similar APIs but different class names and result formats
 
-    fun extractFrameAtTime(uri: Uri, timestampMs: Long): Bitmap? {
-        val retriever = MediaMetadataRetriever()
-        retriever.setDataSource(context, uri)
-        return retriever.getFrameAtTime(timestampMs * 1000) // microseconds
-    }
+5. **Live Activity**: iOS-specific feature - Android uses foreground service with notification (stubbed)
 
-    fun getVideoDuration(uri: Uri): Long {
-        val retriever = MediaMetadataRetriever()
-        retriever.setDataSource(context, uri)
-        return retriever.extractMetadata(
-            MediaMetadataRetriever.METADATA_KEY_DURATION
-        )?.toLong() ?: 0
-    }
-}
-```
-
-**Scan modes - all work the same way:**
-- `quick_check` - Extract 3 frames (start, middle, end)
-- `sampled` - Extract frames at regular intervals
-- `thorough` - ML Kit pose detection → ONNX on human frames
-- `binary_search` - Same algorithm, different frame extraction API
-- `full_short_circuit` - Same as sampled but stops on first detection
-
-### Phase 4: Progress Notification (Live Activity equivalent) ⏱️ ~1 day
-
-**Files to create:**
-- `android/src/main/java/com/visionml/ScanProgressService.kt`
-
-**Implementation:**
-
-iOS Live Activity shows progress on Dynamic Island. Android equivalent is a Foreground Service with a progress notification:
-
-```kotlin
-class ScanProgressService : Service() {
-    private val NOTIFICATION_ID = 1
-    private val CHANNEL_ID = "video_scan_progress"
-
-    fun updateProgress(progress: Float, phase: String, nsfwCount: Int) {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Scanning Video")
-            .setContentText(phase)
-            .setProgress(100, (progress * 100).toInt(), false)
-            .setSmallIcon(R.drawable.ic_scan)
-            .setOngoing(true)
-            .build()
-
-        startForeground(NOTIFICATION_ID, notification)
-    }
-}
-```
-
-### Phase 5: React Native Bridge ⏱️ ~1 day
-
-**Files to create:**
-- `android/src/main/java/com/visionml/VisionMLModule.kt`
-- `android/src/main/java/com/visionml/VisionMLPackage.kt`
-
-**Bridge methods to implement:**
-```kotlin
-@ReactMethod
-fun createDetector(modelPath: String, classLabels: ReadableArray, inputSize: Int, promise: Promise)
-
-@ReactMethod
-fun detect(detectorId: String, imageUri: String, confThreshold: Double, iouThreshold: Double, promise: Promise)
-
-@ReactMethod
-fun disposeDetector(detectorId: String, promise: Promise)
-
-@ReactMethod
-fun analyzeVideo(detectorId: String, assetId: String, mode: String, sampleInterval: Double, confThreshold: Double, promise: Promise)
-
-@ReactMethod
-fun analyzeAnimals(assetId: String, promise: Promise)
-
-@ReactMethod
-fun analyzeHumanPose(assetId: String, promise: Promise)
-
-@ReactMethod
-fun analyzeComprehensive(assetId: String, promise: Promise)
-
-// Progress notification methods (instead of Live Activity)
-@ReactMethod
-fun startScanProgress(videoName: String, duration: Double, mode: String, promise: Promise)
-
-@ReactMethod
-fun updateScanProgress(progress: Double, phase: String, nsfwCount: Int, framesAnalyzed: Int, promise: Promise)
-
-@ReactMethod
-fun endScanProgress(nsfwCount: Int, framesAnalyzed: Int, isNSFW: Boolean, promise: Promise)
-```
-
-## TypeScript Changes
-
-Update `src/index.ts` to handle platform differences:
-
-```typescript
-import { Platform, NativeModules } from 'react-native';
-
-// Live Activity is iOS-only, Android uses notification
-export async function startVideoScanActivity(
-  videoName: string,
-  videoDuration: number,
-  scanMode: string
-): Promise<{ activityId: string | null; success: boolean }> {
-  if (Platform.OS === 'ios') {
-    return VisionML.startVideoScanActivity(videoName, videoDuration, scanMode);
-  } else {
-    // Android: start foreground service notification
-    return VisionML.startScanProgress(videoName, videoDuration, scanMode);
-  }
-}
-
-export async function isLiveActivityAvailable(): Promise<boolean> {
-  if (Platform.OS === 'ios') {
-    return VisionML.isLiveActivityAvailable();
-  }
-  // Android always returns true (notification always available)
-  return true;
-}
-```
-
-## Hardware Acceleration
-
-| Platform | Accelerator | Implementation |
-|----------|-------------|----------------|
-| iOS | CoreML (ANE) | Built into ONNX Runtime iOS |
-| Android | NNAPI | Add NNAPI execution provider |
-
-**Android NNAPI setup:**
-```kotlin
-val sessionOptions = OrtSession.SessionOptions()
-sessionOptions.addNnapi() // Enable NNAPI for GPU/NPU acceleration
-```
-
-## Testing Strategy
-
-1. **Unit tests** for pure logic (YOLOParser, NMS)
-2. **Instrumentation tests** for ONNX inference
-3. **Integration tests** with sample videos
-4. **Cross-platform parity tests** - same image should produce same detections (within tolerance)
-
-## Estimated Timeline
-
-| Phase | Duration | Dependencies |
-|-------|----------|--------------|
-| Phase 1: ONNX Core | 2-3 days | None |
-| Phase 2: ML Kit | 2 days | Phase 1 |
-| Phase 3: Video Analysis | 3-4 days | Phase 1, 2 |
-| Phase 4: Progress Service | 1 day | None |
-| Phase 5: RN Bridge | 1 day | Phase 1-4 |
-| **Total** | **~10 days** | |
-
-## Risk Assessment
-
-| Risk | Likelihood | Mitigation |
-|------|------------|------------|
-| NNAPI performance varies by device | Medium | Fall back to CPU, test on multiple devices |
-| ML Kit results differ from Vision | Low | Both are mature APIs, minor normalization needed |
-| MediaMetadataRetriever limitations | Low | Can use MediaCodec for more control if needed |
-| Large APK size (ONNX Runtime) | Medium | Use ABI splits, consider lite runtime |
-
-## Notes
-
-- **No architectural changes needed** - the TypeScript API stays the same
-- **ONNX models are cross-platform** - same .onnx file works on both
-- **ML Kit is well-documented** - Google provides extensive examples
-- **Video frame extraction is simpler** on Android than iOS (MediaMetadataRetriever is easier than AVAssetImageGenerator)
-
-## Getting Started
+## Testing
 
 ```bash
-# After implementation, test with:
+# Build the Android library
 cd android
 ./gradlew assembleDebug
 
-# Or test in example app:
-cd example
+# In the consuming app
 npx react-native run-android
 ```
+
+## Remaining Work
+
+1. **Foreground Service**: Implement actual progress notification for video scanning
+2. **Integration Testing**: Test with actual ONNX models on Android device
+3. **Performance Tuning**: Profile NNAPI acceleration on various devices
+4. **Error Handling**: Add more detailed error messages for debugging
+
+## Notes
+
+- ONNX models are cross-platform - same .onnx file works on both iOS and Android
+- NNAPI acceleration is attempted automatically, falls back to CPU if unavailable
+- ML Kit models are downloaded on first use (requires network)
+- Video frame extraction is simpler on Android than iOS

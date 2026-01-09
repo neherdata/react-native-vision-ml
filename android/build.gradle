@@ -57,12 +57,15 @@ dependencies {
 
     // Kotlin
     implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3"
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
 
-    // ONNX Runtime for Android (TODO: uncomment when implementing)
-    // implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.16.0'
+    // ONNX Runtime for Android
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.16.0'
 
-    // ML Kit (TODO: uncomment when implementing)
-    // implementation 'com.google.mlkit:pose-detection:18.0.0-beta4'
-    // implementation 'com.google.mlkit:face-detection:16.1.6'
-    // implementation 'com.google.mlkit:image-labeling:17.0.8'
+    // ML Kit
+    implementation 'com.google.mlkit:pose-detection:18.0.0-beta4'
+    implementation 'com.google.mlkit:face-detection:16.1.6'
+    implementation 'com.google.mlkit:image-labeling:17.0.8'
+    implementation 'com.google.mlkit:text-recognition:16.0.0'
 }
