@@ -768,33 +768,43 @@ class VisionMLModule: NSObject {
     reject: @escaping RCTPromiseRejectBlock
   ) {
     DispatchQueue.main.async {
-      // Try specific Sensitive Content Warning settings first
-      if let url = URL(string: "App-Prefs:SENSITIVE_CONTENT_WARNING") {
-        if UIApplication.shared.canOpenURL(url) {
+      // Try Privacy & Security deep link first (works on iOS 15+)
+      let privacyUrls = [
+        "App-Prefs:Privacy&path=SENSITIVE_CONTENT_WARNING",  // Specific SCA path
+        "App-Prefs:Privacy",                                  // Privacy & Security
+        "prefs:root=Privacy",                                 // Alternative format
+      ]
+
+      for urlString in privacyUrls {
+        if let url = URL(string: urlString), UIApplication.shared.canOpenURL(url) {
           UIApplication.shared.open(url, options: [:]) { success in
-            resolve(["opened": success, "url": "App-Prefs:SENSITIVE_CONTENT_WARNING"])
+            if success {
+              resolve([
+                "opened": true,
+                "url": urlString,
+                "instructions": "Scroll down and tap 'Sensitive Content Warning' to enable it"
+              ])
+            }
           }
           return
         }
       }
 
-      // Fallback to Privacy settings
-      if let url = URL(string: "App-Prefs:Privacy") {
-        if UIApplication.shared.canOpenURL(url) {
-          UIApplication.shared.open(url, options: [:]) { success in
-            resolve(["opened": success, "url": "App-Prefs:Privacy"])
-          }
-          return
-        }
-      }
-
-      // Final fallback to general Settings
+      // Fallback to app settings
       if let url = URL(string: UIApplication.openSettingsURLString) {
         UIApplication.shared.open(url, options: [:]) { success in
-          resolve(["opened": success, "url": "Settings"])
+          resolve([
+            "opened": success,
+            "url": "Settings",
+            "instructions": "Go to: Privacy & Security → Sensitive Content Warning"
+          ])
         }
       } else {
-        resolve(["opened": false, "url": nil])
+        resolve([
+          "opened": false,
+          "url": nil as String?,
+          "instructions": "Open Settings → Privacy & Security → Sensitive Content Warning"
+        ])
       }
     }
   }
